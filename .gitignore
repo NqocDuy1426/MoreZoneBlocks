@@ -1,0 +1,10 @@
+*.dll.mdb
+*.exe
+*.exe.mdb
+bin/
+obj/
+content/
+*.suo
+*.user
+.DS_Store
+upload_workshop.sh
