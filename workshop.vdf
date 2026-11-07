@@ -1,0 +1,86 @@
+"workshopitem"
+{
+	"appid"		"255710"
+	"publishedfileid"		"3835327455"
+	"contentfolder"		"/Users/nqocduy/CS_MoreZoneBlocks/content"
+	"previewfile"		"/Users/nqocduy/CS_MoreZoneBlocks/preview-image.png"
+	"visibility"		"0"
+	"title"		"More Zone Blocks v1.0"
+	"description"		"[h1]🏗️ MORE ZONE BLOCKS v1.0 🏗️[/h1]
+[b]The Definitive 64K Zone Block Limit Breaker for Cities: Skylines[/b]
+[i]Engineered with Two-Stream Vanilla Save Preservation and 64-Block Simulation Pacing by NgocDuy[/i]
+
+[hr][/hr]
+
+[h1]🌟 WHAT IS THIS MOD?[/h1]
+Have you ever hit the invisible [b]Zone Block limit[/b] while building a sprawling metropolis or expanding your regional highway and transit network?
+In vanilla Cities: Skylines, [b]ZoneManager.MAX_BLOCK_COUNT is hardcoded at 49,152 blocks (48K)[/b].
+When you build extensive road networks—especially when using [b]More Nodes/Segments (64K)[/b] or [b]81 Tiles 2[/b]—every road segment generates up to 4 Zone Blocks. Once you cross ~22,000 segments, the 49,152 Zone Block ceiling is completely exhausted!
+
+[b]The Consequence:[/b]
+New roads lose their zoning grids completely (no colored zoning squares appear), road placement tools freeze, and buildings cannot grow.
+
+[b]More Zone Blocks v1.0[/b] breaks this barrier, safely expanding the internal Zone Block capacity to [b]65,535 blocks (64K)[/b] — giving you [b]+16,383 additional Zone Blocks (+33.3% capacity)[/b]!
+
+[list]
+[*] [b]Vanilla Limit:[/b] 49,152 Zone Blocks
+[*] [b]More Zone Blocks Limit:[/b] [b]65,535 Zone Blocks (16-bit Maximum Ceiling)[/b]
+[*] [b]Savegame Safety:[/b] [b]Two-Stream Vanilla Preservation (100% Safe to load without mods)[/b]
+[*] [b]Simulation Guarantee:[/b] 64-Block frame pacing ensures buildings grow properly on all extended blocks
+[*] [b]Compatibility:[/b] 100% compatible with 81 Tiles 2, More Nodes/Segments, Zoning Adjuster, Move It, Network Anarchy, and RICO
+[/list]
+
+[hr][/hr]
+
+[h1]⚡ KEY ARCHITECTURAL ADVANTAGES[/h1]
+
+[list]
+[*] [b]Safe 16-Bit Architecture (Zero Overflow):[/b]
+    By expanding to 65,535 ($0xFFFF$), all internal pointers in [i]NetSegment[/i], [i]ZoneBlock[/i], and [i]ZoneManager[/i] remain native [b]ushort[/b]. No memory layout corruption, no struct bloat, and zero CPU register overflow.
+
+[*] [b]Two-Stream Save Preservation (Zero Dangling Pointers):[/b]
+    Before saving, block pointers $\ge 49,152$ in [i]NetSegment[/i] are temporarily sanitized to 0 for the vanilla save stream, while their mapping and full data are safely packaged into a custom Sidecar Stream ([i]MoreZoneBlocks_Extended[/i]).
+    [b]Result:[/b] Your savegame can be opened on vanilla or unmodded installations without triggering fatal [i]IndexOutOfRangeException[/i] crashes! When loaded with More Zone Blocks, all 65K blocks and segment linkages are seamlessly restored.
+
+[*] [b]64-Block Frame Pacing (100% Simulation Coverage):[/b]
+    Vanilla's [i]ZoneManager.SimulationStepImpl[/i] only steps 48 blocks per frame ($1,024 \times 48 = 49,152$). We re-engineered the pacing to [b]64 blocks per frame ($1,024 \times 64 = 65,536$)[/b].
+    [b]Result:[/b] All extended blocks receive active simulation ticks, allowing residential, commercial, industrial, and office zones to grow naturally.
+
+[*] [b]18 Inlined Loop Guards Neutralized:[/b]
+    Patched hardcoded 49,152 loop break thresholds across [i]ZoneBlock[/i], [i]Building.CheckZoning[/i], [i]ZoneTool[/i], [i]DefaultTool[/i], and [i]BuildingTool[/i], permanently eliminating [i]Invalid list detected![/i] error spam.
+
+[*] [b]Simulation-Thread Safe Auto-GC:[/b]
+    Background garbage collector runs exclusively on the simulation thread (16 segments/tick), safely purging orphaned, unzoned blocks on highways, freeways, elevated viaducts, and rail corridors to keep your block pool clean and lag-free.
+[/list]
+
+[hr][/hr]
+
+[h1]🧩 COMPATIBILITY[/h1]
+Tested and fully compatible with the modern modding ecosystem:
+[list]
+[*] [b]Harmony 2.2+[/b] (Required dependency)
+[*] [b]More Nodes/Segments (v5.1.4+)[/b] (Perfect synergy)
+[*] [b]81 Tiles 2[/b] (Coexistence architecture: respects $270 \times 270$ zone grid)
+[*] [b]Zoning Adjuster[/b]
+[*] [b]Network Anarchy[/b]
+[*] [b]Move It[/b]
+[*] [b]Find It! 2[/b]
+[*] [b]Plop the Growables & Ploppable RICO Revisited[/b]
+[*] [b]TM:PE (Traffic Manager)[/b]
+[*] [b]Adaptive Roads & Network Skins[/b]
+[*] [b]More Props BETA / More Props[/b]
+[*] [b]More Vehicles Renew[/b]
+[/list]
+
+[hr][/hr]
+
+[h1]📋 REQUIREMENTS[/h1]
+[list]
+[*] [url=https://steamcommunity.com/workshop/filedetails/?id=2040656402]Harmony 2.2.2-0 (CitiesHarmony)[/url]
+[/list]
+
+[hr][/hr]
+
+[i]Developed with precision and care for the Cities: Skylines community by NgocDuy.[/i]"
+	"changenote"		"v1.0 Initial Release: 64K Zone Blocks Limit Breaker with Two-Stream Vanilla Save Preservation, 64-Block Simulation Pacing, and Simulation-Thread Safe Auto-GC."
+}

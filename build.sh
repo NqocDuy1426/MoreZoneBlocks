@@ -49,6 +49,15 @@ cp "$MOD_NAME.dll" "$SCRIPT_DIR/content/"
 cp "$CITIES_HARMONY_API_DLL" "$SCRIPT_DIR/content/"
 [ -f preview-image.png ] && cp preview-image.png "$SCRIPT_DIR/content/PreviewImage.png"
 
+# 5. Deploy to Steam Workshop directory if subscribed
+WORKSHOP_DIR="$HOME/Library/Application Support/Steam/steamapps/workshop/content/255710/3835327455"
+if [ -d "$WORKSHOP_DIR" ]; then
+    echo "5️⃣ Deploying to Steam Workshop staging ($WORKSHOP_DIR)..."
+    cp "$MOD_NAME.dll" "$WORKSHOP_DIR/"
+    cp "$CITIES_HARMONY_API_DLL" "$WORKSHOP_DIR/"
+    [ -f preview-image.png ] && cp preview-image.png "$WORKSHOP_DIR/PreviewImage.png"
+fi
+
 echo "=========================================================="
 echo "🎉 DEPLOYMENT COMPLETE!"
 echo "Files in $MOD_DIR:"
