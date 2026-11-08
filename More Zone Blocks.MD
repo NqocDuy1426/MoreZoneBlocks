@@ -373,8 +373,8 @@ namespace MoreZoneBlocks.Core128K
                     activeCount++;
             }
 
-            // Quét dải cao: 131071 ngược về 65536
-            for (int i = 131071; i >= 65536; i--)
+            // Quét dải cao: 131071 ngược về 65537 (Giữ slot 65536 làm Sentinel để low-16-bit không bao giờ bằng 0!)
+            for (int i = 131071; i >= 65537; i--)
             {
                 if ((buffer[i].m_flags & ZoneBlock.FLAG_CREATED) == 0)
                     s_highFreeList[s_highFreeCount++] = (uint)i;
@@ -434,7 +434,7 @@ namespace MoreZoneBlocks.Core128K
 
         public static void ReleaseBlockId32(uint blockID)
         {
-            if (blockID == 0) return;
+            if (blockID == 0 || blockID == 65536u) return; // Bảo lưu slot 0 và Sentinel 65536
             if (blockID < 65536u)
                 s_lowFreeList[s_lowFreeCount++] = (ushort)blockID;
             else if (blockID < 131072u)
@@ -489,7 +489,36 @@ namespace MoreZoneBlocks.Core128K
             }
         }
 
-        public static void UnlinkFromGrid32(ZoneManager zm, uint blockID, ref ZoneBlock data)
+        /// <summary>
+        /// Hàm ReleaseBlock32 hoàn chỉnh bọc ngoài UnlinkFromGrid32 (Chống lỗi Double-Clear)
+        /// </summary>
+        public static void ReleaseBlock32(ZoneManager zm, uint blockID, ref ZoneBlock data)
+        {
+            if ((data.m_flags & ZoneBlock.FLAG_CREATED) == 0) return;
+
+            // Nếu UnlinkFromGrid32 báo đã thực hiện In-Place Relocation vào chính slot blockID:
+            // Slot blockID hiện đang chứa dữ liệu sống của node >= 65536 vừa chuyển về làm Head!
+            // -> Thoát ngay, KHÔNG xóa data và KHÔNG trả blockID về FreeList!
+            bool relocatedInPlace = UnlinkFromGrid32(zm, blockID, ref data);
+            if (relocatedInPlace)
+            {
+                // Đánh dấu cập nhật lại block ở địa chỉ mới
+                zm.m_updatedBlocks[blockID >> 6] |= 1UL << (int)(blockID & 63);
+                zm.m_blocksUpdated = true;
+                return;
+            }
+
+            // Trường hợp xóa bình thường:
+            data = default(ZoneBlock);
+            DualPoolAllocator128K.ReleaseBlockId32(blockID);
+        }
+
+        /// <summary>
+        /// Tháo gỡ block khỏi lưới ô đất.
+        /// Trả về true nếu đã thực hiện In-Place Relocation (di dời node 17-bit về slot 16-bit blockID).
+        /// Khi trả về true, caller KHÔNG ĐƯỢC xóa data và KHÔNG ĐƯỢC giải phóng blockID về Free List!
+        /// </summary>
+        public static bool UnlinkFromGrid32(ZoneManager zm, uint blockID, ref ZoneBlock data)
         {
             int gridRes = (int)Mathf.Sqrt(zm.m_zoneGrid.Length);
             float halfGrid = gridRes * 0.5f;
@@ -531,7 +560,7 @@ namespace MoreZoneBlocks.Core128K
                                 // Cứu chuỗi tức thì bằng In-Place Relocation:
                                 // Di dời node nextID (>= 65536) thế chỗ vào đúng slot 16-bit vừa giải phóng (blockID)!
                                 zm.m_zoneGrid[cellIndex] = RelocateHighNodeIntoReleasedLowHead(zm, (ushort)blockID, nextID);
-                                return; // Slot blockID đã được tái sử dụng làm Head mới, không xóa trắng data
+                                return true; // Đã di dời thành công vào slot blockID, báo caller giữ nguyên slot!
                             }
                         }
                     }
@@ -548,6 +577,7 @@ namespace MoreZoneBlocks.Core128K
             }
 
             BitStash128K.SetNextGridBlock32(ref data, 0u);
+            return false;
         }
 
         /// <summary>
