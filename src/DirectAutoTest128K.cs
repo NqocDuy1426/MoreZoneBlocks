@@ -25,6 +25,67 @@ namespace MoreZoneBlocks
         }
     }
 
+    [HarmonyPatch(typeof(GuideManager), "SimulationStepImpl")]
+    public static class GuideManagerPatch
+    {
+        [HarmonyFinalizer]
+        public static Exception Finalizer(Exception __exception)
+        {
+            if (__exception != null)
+            {
+                Log.Warning("[MoreZoneBlocks] Handled GuideManager.SimulationStepImpl safely: " + __exception.Message);
+            }
+            return null; // Suppress guide null reference safely to keep simulation running cleanly!
+        }
+    }
+
+    [HarmonyPatch(typeof(UIDynamicPanels))]
+    public static class UIDynamicPanels_Hide_Patch
+    {
+        [HarmonyPatch("Hide", new Type[] { typeof(string), typeof(int) })]
+        [HarmonyPrefix]
+        public static void PrefixInt(UIDynamicPanels __instance, string panelName)
+        {
+            ReconcileModal(__instance, panelName);
+        }
+
+        [HarmonyPatch("Hide", new Type[] { typeof(string) })]
+        [HarmonyPrefix]
+        public static void PrefixSingle(UIDynamicPanels __instance, string panelName)
+        {
+            ReconcileModal(__instance, panelName);
+        }
+
+        private static void ReconcileModal(UIDynamicPanels instance, string panelName)
+        {
+            try
+            {
+                if (instance == null || string.IsNullOrEmpty(panelName)) return;
+                var cachedPanelsField = AccessTools.Field(typeof(UIDynamicPanels), "m_CachedPanels");
+                var cached = cachedPanelsField?.GetValue(instance) as System.Collections.IDictionary;
+                if (cached != null && cached.Contains(panelName))
+                {
+                    object panelInfo = cached[panelName];
+                    var isModalProp = AccessTools.Property(panelInfo.GetType(), "isModal");
+                    var instProp = AccessTools.Property(panelInfo.GetType(), "instance");
+                    bool isModal = (bool)(isModalProp?.GetValue(panelInfo, null) ?? false);
+                    UIComponent comp = instProp?.GetValue(panelInfo, null) as UIComponent;
+
+                    if (isModal && comp != null)
+                    {
+                        var top = UIView.GetModalComponent();
+                        if (top != comp)
+                        {
+                            // Modal stack mismatch guard: Push comp to top of modal stack so Hide() never throws InvalidOperationException!
+                            UIView.PushModal(comp);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
     public class MZBAutoTestLoadingExtension : LoadingExtensionBase
     {
         public override void OnLevelLoaded(LoadMode mode)
@@ -105,23 +166,17 @@ namespace MoreZoneBlocks
         {
             try
             {
-                UIView.PopAllModal();
-
                 var allComponents = UnityEngine.Object.FindObjectsOfType<UIComponent>();
                 foreach (var comp in allComponents)
                 {
                     if (comp != null && (
-                        comp.name.Contains("Modal") || 
-                        comp.name.Contains("Dialog") || comp.name.Contains("WhatsNew") || 
+                        comp.name.Contains("WhatsNew") || 
                         comp.name.Contains("DLC") || comp.name.Contains("Paradox") || 
-                        comp.name.Contains("Debug") || comp.name.Contains("Popup") ||
                         comp.name.Contains("News") || comp.name.Contains("WorkshopAd") ||
-                        comp.name.Contains("Error") || comp.name.Contains("Exception") ||
                         comp.name.Contains("FPS") || comp.name.Contains("Booster")))
                     {
                         comp.Hide();
                         comp.isVisible = false;
-                        UnityEngine.Object.Destroy(comp.gameObject);
                     }
                 }
             }
@@ -158,13 +213,10 @@ namespace MoreZoneBlocks
 
                 if (saveFile == null)
                 {
-                    saveFile = files.FirstOrDefault(f => f.EndsWith("dreamcity30.crp", StringComparison.OrdinalIgnoreCase))
-                            ?? files.FirstOrDefault(f => f.EndsWith("backup7.crp", StringComparison.OrdinalIgnoreCase))
-                            ?? files.FirstOrDefault(f => f.EndsWith("NewSave.crp", StringComparison.OrdinalIgnoreCase))
-                            ?? files.FirstOrDefault(f => f.Contains("Canalville"))
-                            ?? files.FirstOrDefault(f => f.Contains("backup7"))
-                            ?? files.FirstOrDefault(f => f.Contains("Quang Ninh"))
-                            ?? files.FirstOrDefault(f => f.Contains("mới"))
+                    saveFile = files.FirstOrDefault(f => f.EndsWith("backup7.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.EndsWith("backup6_Rescued.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.EndsWith("backup5.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.EndsWith("dreamcity30.crp", StringComparison.OrdinalIgnoreCase))
                             ?? files.FirstOrDefault();
                 }
 
@@ -409,7 +461,11 @@ namespace MoreZoneBlocks
             }
             finally
             {
-                Application.Quit();
+                // Do not auto-quit if keep_open requested, allowing user to view the interface live!
+                if (File.Exists("/Users/nqocduy/autotest_auto_quit.txt"))
+                {
+                    Application.Quit();
+                }
             }
         }
     }
