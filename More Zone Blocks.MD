@@ -979,6 +979,17 @@ namespace MoreZoneBlocks.Core128K
 ### 6.8 Mã Nguồn Lõi 6: `ZoneTraversalTranspiler128K.cs` (Universal 17-Bit Linked-List Traversal Transpiler)
 
 #### Cơ chế tự động hóa duyệt lưới 17-bit:
+#### ⚠️ Cạm Bẫy ABI Cắt Bit ở Lời Gọi Hàm Con (`CalculateBlock2` & `CalculateBlock3`)
+Trong `ZoneBlock.CalculateBlock2(ushort blockID)`, biến cục bộ `num` giữ trọn vẹn 17-bit khi duyệt `while (num != 0)`.
+Tuy nhiên, hàm gọi tiếp theo:
+```csharp
+this.CalculateImplementation2(blockID, num, ref instance.m_blocks.m_buffer[(int)num], ...);
+```
+Tham số thứ 2 `ushort otherID` của hàm `CalculateImplementation2` có kiểu `ushort` 16-bit!
+- `otherID` chỉ dùng duy nhất cho việc kiểm tra `if (otherID != blockID)` để tránh tự kiểm tra va chạm với chính nó.
+- Nếu `blockID = 10` và trong ô lưới có `num = 65546` ($65536 + 10$), khi truyền qua ABI 16-bit, `65546` bị cắt thành `10`, khiến game tưởng lầm là cùng một block và bỏ qua kiểm tra va chạm!
+- **Giải pháp triệt để:** Sử dụng biến `[ThreadStatic] public static uint CurrentExecutingBlockID32` trong `ZoneUpdateAndSim128K` (Mục 6.9 bên dưới) để đối chiếu chính xác ID 32-bit thực sự, loại bỏ hoàn toàn nguy cơ trùng ID sau phép cắt bit.
+
 Trong game gốc có hơn 12 hàm (`CalculateBlock2`, `CalculateBlock3`, `SimulationStep`, `CheckZoning`, `ApplyZoning`, `RenderOverlay`...) duyệt chuỗi liên kết `m_nextGridBlock` theo cấu trúc:
 ```csharp
 ushort num = instance.m_zoneGrid[z * 150 + x]; // Luôn < 65536 nhờ Head-Reservation
@@ -1070,7 +1081,395 @@ namespace MoreZoneBlocks.Core128K
 
 ---
 
-### 6.9 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
+### 6.9 Mã Nguồn Lõi 7: `ZoneUpdateAndSim128K.cs` (Điều Phối Viên UpdateBlocks 2048-Bitmask & SimulationStepImpl 128-Step)
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
+using HarmonyLib;
+
+namespace MoreZoneBlocks.Core128K
+{
+    /// <summary>
+    /// Mã Nguồn Lõi 7: Điều phối viên 128K cho ZoneManager.Awake, UpdateBlocks và SimulationStepImpl.
+    /// Đảm bảo toàn bộ 131.072 ZoneBlock đều được tính toán hình học, cập nhật lưới và mọc nhà!
+    /// </summary>
+    [HarmonyPatch]
+    public static class ZoneUpdateAndSim128K
+    {
+        public const int VANILLA_MAX_BLOCKS = 49152;
+        public const int VANILLA_UPDATED_LEN = 768;
+        public const int EXTENDED_UPDATED_LEN = 2048; // 131072 / 64
+
+        // Lưu trữ ID 32-bit thực sự của block đang được thực thi trong luồng hiện tại
+        // Giúp bên trong CalculateBlock2/3 biết chính xác ID 17-bit của `this` mà không sợ bị cắt 16-bit!
+        [ThreadStatic]
+        public static uint CurrentExecutingBlockID32;
+
+        /// <summary>
+        /// 1. Postfix ZoneManager.Awake: Nâng cấp m_blocks.m_buffer lên 131.072 và m_updatedBlocks lên 2048
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager), "Awake")]
+        [HarmonyPostfix]
+        public static void Awake_Postfix(ZoneManager __instance)
+        {
+            // Mở rộng m_buffer bên trong Array16<ZoneBlock> lên 131.072 phần tử
+            ZoneBlock[] newBuffer = new ZoneBlock[BitStash128K.MAX_BLOCK_COUNT];
+            if (__instance.m_blocks.m_buffer != null)
+            {
+                Array.Copy(
+                    __instance.m_blocks.m_buffer,
+                    newBuffer,
+                    Math.Min(__instance.m_blocks.m_buffer.Length, BitStash128K.MAX_BLOCK_COUNT)
+                );
+            }
+            __instance.m_blocks.m_buffer = newBuffer;
+
+            // Cập nhật m_size nội bộ của Array16
+            FieldInfo fSize = AccessTools.Field(typeof(Array16<ZoneBlock>), "m_size");
+            fSize?.SetValue(__instance.m_blocks, (uint)BitStash128K.MAX_BLOCK_COUNT);
+
+            // Mở rộng m_updatedBlocks lên 2048 ulongs (131.072 bits)
+            __instance.m_updatedBlocks = new ulong[EXTENDED_UPDATED_LEN];
+
+            // Khởi tạo Dual-Pool Free Lists (1..65535 và 65537..131071, bỏ qua Sentinel 65536)
+            DualPoolAllocator128K.RebuildFreeLists(newBuffer);
+        }
+
+        /// <summary>
+        /// 2. Thay thế ZoneManager.UpdateBlocks để quét trọn vẹn 2048 ulongs (131.072 blocks)
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager), nameof(ZoneManager.UpdateBlocks))]
+        [HarmonyPrefix]
+        public static bool UpdateBlocks_Prefix(ZoneManager __instance)
+        {
+            if (!__instance.m_blocksUpdated) return false;
+            __instance.m_blocksUpdated = false;
+
+            ZoneBlock[] buffer = __instance.m_blocks.m_buffer;
+            ulong[] updated = __instance.m_updatedBlocks;
+            int len = updated.Length; // 2048
+
+            // Pha 1: CalculateBlock1
+            for (int i = 0; i < len; i++)
+            {
+                ulong mask = updated[i];
+                if (mask != 0uL)
+                {
+                    for (int bit = 0; bit < 64; bit++)
+                    {
+                        if ((mask & (1UL << bit)) != 0uL)
+                        {
+                            uint blockID = (uint)((i << 6) | bit);
+                            CurrentExecutingBlockID32 = blockID;
+                            buffer[blockID].CalculateBlock1((ushort)blockID);
+                        }
+                    }
+                }
+            }
+
+            // Pha 2: CalculateBlock2 (Tính va chạm chồng lấn giữa các block trong cùng ô lưới)
+            for (int i = 0; i < len; i++)
+            {
+                ulong mask = updated[i];
+                if (mask != 0uL)
+                {
+                    for (int bit = 0; bit < 64; bit++)
+                    {
+                        if ((mask & (1UL << bit)) != 0uL)
+                        {
+                            uint blockID = (uint)((i << 6) | bit);
+                            CurrentExecutingBlockID32 = blockID;
+                            buffer[blockID].CalculateBlock2((ushort)blockID);
+                        }
+                    }
+                }
+            }
+
+            // Pha 3: CalculateBlock3 & RefreshZoning, đồng thời xóa cờ m_updatedBlocks
+            for (int i = 0; i < len; i++)
+            {
+                ulong mask = updated[i];
+                if (mask != 0uL)
+                {
+                    updated[i] = 0uL;
+                    for (int bit = 0; bit < 64; bit++)
+                    {
+                        if ((mask & (1UL << bit)) != 0uL)
+                        {
+                            uint blockID = (uint)((i << 6) | bit);
+                            CurrentExecutingBlockID32 = blockID;
+                            buffer[blockID].CalculateBlock3((ushort)blockID);
+                            buffer[blockID].RefreshZoning((ushort)blockID);
+                        }
+                    }
+                }
+            }
+
+            CurrentExecutingBlockID32 = 0u;
+            return false; // Chặn hàm 768-ulong gốc
+        }
+
+        /// <summary>
+        /// 3. Transpiler cho ZoneManager.SimulationStepImpl:
+        /// Đổi bước nhảy từ 48 (ldc.i4.s 48) sang 128 (ldc.i4 128) để quét đủ 131.072 blocks trong 1024 frames!
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager), "SimulationStepImpl")]
+        [HarmonyTranspiler]
+        public static IEnumerable<CodeInstruction> SimulationStepImpl_Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            foreach (var inst in instructions)
+            {
+                // Bắt buộc đổi cả OpCode từ Ldc_I4_S (sbyte) sang Ldc_I4 (int32) vì 128 tràn số dương sbyte!
+                if (inst.opcode == OpCodes.Ldc_I4_S && Convert.ToInt32(inst.operand) == 48)
+                {
+                    inst.opcode = OpCodes.Ldc_I4;
+                    inst.operand = 128; // 128 blocks/frame * 1024 frames = 131.072 blocks
+                }
+                yield return inst;
+            }
+        }
+    }
+}
+```
+
+---
+
+### 6.10 Mã Nguồn Lõi 8: `SaveSanitizer128K.cs` (Bảo Toàn Savegame Vanilla & Sidecar 128K)
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using ColossalFramework;
+using HarmonyLib;
+using ICities;
+using UnityEngine;
+
+namespace MoreZoneBlocks.Core128K
+{
+    /// <summary>
+    /// Mã Nguồn Lõi 8: Hệ thống lưu/nạp Two-Stream bảo toàn Savegame Vanilla 100%.
+    /// Giấu các block >= 49.152 khỏi luồng Vanilla và đóng gói vào Sidecar Stream độc lập.
+    /// </summary>
+    [HarmonyPatch]
+    public static class SaveSanitizer128K
+    {
+        public const string SIDECAR_KEY = "MoreZoneBlocks_Extended_128K";
+        public const uint SIDECAR_MAGIC = 0x4D5A4232; // "MZB2"
+        public const uint SIDECAR_VERSION = 2;
+
+        public struct SegmentBlockMapping128K
+        {
+            public ushort SegmentID;
+            public byte Slot; // 0=SL, 1=SR, 2=EL, 3=ER
+            public uint HighBlockID; // Hỗ trợ trọn vẹn 131.071 ID
+        }
+
+        private static readonly List<SegmentBlockMapping128K> s_savedMappings = new List<SegmentBlockMapping128K>(8192);
+
+        /// <summary>
+        /// S1. Trước khi NetManager Serialize: Thu thập các slot >= 49.152, xóa 4 cờ bit cao m_flags2
+        /// và tạm gán slot về 0 để Vanilla Stream không bao giờ chứa ID ngoài 48K.
+        /// </summary>
+        [HarmonyPatch(typeof(NetManager.Data), "Serialize")]
+        [HarmonyPrefix]
+        public static void NetManager_Serialize_Prefix()
+        {
+            s_savedMappings.Clear();
+            NetManager nm = NetManager.instance;
+            if (nm?.m_segments?.m_buffer == null) return;
+
+            NetSegment[] segs = nm.m_segments.m_buffer;
+            int count = segs.Length;
+
+            for (ushort i = 1; i < count; i++)
+            {
+                if ((segs[i].m_flags & NetSegment.Flags.Created) == 0) continue;
+
+                uint sl = BitStash128K.GetStartLeft32(ref segs[i]);
+                if (sl >= 49152u)
+                {
+                    s_savedMappings.Add(new SegmentBlockMapping128K { SegmentID = i, Slot = 0, HighBlockID = sl });
+                    BitStash128K.SetStartLeft32(ref segs[i], 0u);
+                }
+
+                uint sr = BitStash128K.GetStartRight32(ref segs[i]);
+                if (sr >= 49152u)
+                {
+                    s_savedMappings.Add(new SegmentBlockMapping128K { SegmentID = i, Slot = 1, HighBlockID = sr });
+                    BitStash128K.SetStartRight32(ref segs[i], 0u);
+                }
+
+                uint el = BitStash128K.GetEndLeft32(ref segs[i]);
+                if (el >= 49152u)
+                {
+                    s_savedMappings.Add(new SegmentBlockMapping128K { SegmentID = i, Slot = 2, HighBlockID = el });
+                    BitStash128K.SetEndLeft32(ref segs[i], 0u);
+                }
+
+                uint er = BitStash128K.GetEndRight32(ref segs[i]);
+                if (er >= 49152u)
+                {
+                    s_savedMappings.Add(new SegmentBlockMapping128K { SegmentID = i, Slot = 3, HighBlockID = er });
+                    BitStash128K.SetEndRight32(ref segs[i], 0u);
+                }
+            }
+        }
+
+        /// <summary>
+        /// S2. Sau khi ZoneManager Serialize: Đóng gói các block 49.152..131.071 và s_savedMappings vào Sidecar Stream,
+        /// sau đó khôi phục lại ngay con trỏ 17-bit trên RAM.
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager.Data), "Serialize")]
+        [HarmonyPostfix]
+        public static void ZoneManager_Serialize_Postfix()
+        {
+            try
+            {
+                ZoneManager zm = ZoneManager.instance;
+                ZoneBlock[] blocks = zm.m_blocks.m_buffer;
+
+                using (var ms = new MemoryStream())
+                using (var bw = new BinaryWriter(ms))
+                {
+                    bw.Write(SIDECAR_MAGIC);
+                    bw.Write(SIDECAR_VERSION);
+
+                    // 1. Ghi các block đang hoạt động trong dải 49.152 .. 131.071
+                    int activeCount = 0;
+                    for (uint i = 49152u; i < BitStash128K.MAX_BLOCK_COUNT; i++)
+                    {
+                        if ((blocks[i].m_flags & ZoneBlock.FLAG_CREATED) != 0) activeCount++;
+                    }
+                    bw.Write(activeCount);
+
+                    for (uint i = 49152u; i < BitStash128K.MAX_BLOCK_COUNT; i++)
+                    {
+                        if ((blocks[i].m_flags & ZoneBlock.FLAG_CREATED) == 0) continue;
+                        bw.Write(i);
+                        bw.Write(blocks[i].m_flags);
+                        bw.Write((ushort)blocks[i].RowCount);
+                        bw.Write(blocks[i].m_buildIndex);
+                        bw.Write(blocks[i].m_position.x);
+                        bw.Write(blocks[i].m_position.y);
+                        bw.Write(blocks[i].m_position.z);
+                        bw.Write(blocks[i].m_angle);
+                        bw.Write(blocks[i].m_segment);
+                        bw.Write(blocks[i].m_zone1);
+                        bw.Write(blocks[i].m_zone2);
+                        bw.Write(blocks[i].m_occupied1);
+                        bw.Write(blocks[i].m_occupied2);
+                        bw.Write(blocks[i].m_valid);
+                        bw.Write(blocks[i].m_shared);
+                        bw.Write(BitStash128K.GetNextGridBlock32(ref blocks[i]));
+                    }
+
+                    // 2. Ghi bảng ánh xạ NetSegment
+                    bw.Write(s_savedMappings.Count);
+                    for (int m = 0; m < s_savedMappings.Count; m++)
+                    {
+                        bw.Write(s_savedMappings[m].SegmentID);
+                        bw.Write(s_savedMappings[m].Slot);
+                        bw.Write(s_savedMappings[m].HighBlockID);
+                    }
+
+                    // Lưu vào SerializableDataManager
+                    SimulationManager.instance.m_SerializableDataStorage.SaveData(SIDECAR_KEY, ms.ToArray());
+                }
+            }
+            finally
+            {
+                // Khôi phục lại 4 slot và 4 cờ bit cao trong RAM
+                NetSegment[] segs = NetManager.instance.m_segments.m_buffer;
+                for (int m = 0; m < s_savedMappings.Count; m++)
+                {
+                    ushort segID = s_savedMappings[m].SegmentID;
+                    uint highID = s_savedMappings[m].HighBlockID;
+                    switch (s_savedMappings[m].Slot)
+                    {
+                        case 0: BitStash128K.SetStartLeft32(ref segs[segID], highID); break;
+                        case 1: BitStash128K.SetStartRight32(ref segs[segID], highID); break;
+                        case 2: BitStash128K.SetEndLeft32(ref segs[segID], highID); break;
+                        case 3: BitStash128K.SetEndRight32(ref segs[segID], highID); break;
+                    }
+                }
+                s_savedMappings.Clear();
+            }
+        }
+
+        /// <summary>
+        /// L1. Khi nạp Save: Bung các block 49.152..131.071 từ Sidecar và phục hồi con trỏ NetSegment
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager.Data), "Deserialize")]
+        [HarmonyPrefix]
+        public static void ZoneManager_Deserialize_Prefix()
+        {
+            ZoneManager zm = ZoneManager.instance;
+            ZoneUpdateAndSim128K.Awake_Postfix(zm); // Đảm bảo buffer 131.072 đã sẵn sàng
+
+            byte[] data = SimulationManager.instance.m_SerializableDataStorage.LoadData(SIDECAR_KEY);
+            if (data == null || data.Length == 0) return;
+
+            using (var ms = new MemoryStream(data))
+            using (var br = new BinaryReader(ms))
+            {
+                uint magic = br.ReadUInt32();
+                uint version = br.ReadUInt32();
+                if (magic != SIDECAR_MAGIC || version != SIDECAR_VERSION) return;
+
+                int blockCount = br.ReadInt32();
+                ZoneBlock[] blocks = zm.m_blocks.m_buffer;
+
+                for (int i = 0; i < blockCount; i++)
+                {
+                    uint id = br.ReadUInt32();
+                    blocks[id].m_flags = br.ReadUInt32();
+                    blocks[id].RowCount = br.ReadUInt16();
+                    blocks[id].m_buildIndex = br.ReadUInt32();
+                    blocks[id].m_position = new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                    blocks[id].m_angle = br.ReadSingle();
+                    blocks[id].m_segment = br.ReadUInt16();
+                    blocks[id].m_zone1 = br.ReadUInt64();
+                    blocks[id].m_zone2 = br.ReadUInt64();
+                    blocks[id].m_occupied1 = br.ReadUInt64();
+                    blocks[id].m_occupied2 = br.ReadUInt64();
+                    blocks[id].m_valid = br.ReadUInt64();
+                    blocks[id].m_shared = br.ReadUInt64();
+                    uint next32 = br.ReadUInt32();
+                    BitStash128K.SetNextGridBlock32(ref blocks[id], next32);
+
+                    // Đăng ký lại vào m_zoneGrid
+                    ZoneGridLinker128K.InitializeBlock32(zm, id, ref blocks[id]);
+                }
+
+                // Phục hồi NetSegment slots
+                int mapCount = br.ReadInt32();
+                NetSegment[] segs = NetManager.instance.m_segments.m_buffer;
+                for (int m = 0; m < mapCount; m++)
+                {
+                    ushort segID = br.ReadUInt16();
+                    byte slot = br.ReadByte();
+                    uint highID = br.ReadUInt32();
+                    switch (slot)
+                    {
+                        case 0: BitStash128K.SetStartLeft32(ref segs[segID], highID); break;
+                        case 1: BitStash128K.SetStartRight32(ref segs[segID], highID); break;
+                        case 2: BitStash128K.SetEndLeft32(ref segs[segID], highID); break;
+                        case 3: BitStash128K.SetEndRight32(ref segs[segID], highID); break;
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+### 6.11 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
 
 1. **0 Byte Mảng Phụ Ngoại Lai:** Không cần tạo thêm bất kỳ mảng `uint[]` nào cho `NetSegment` hay `m_zoneGrid`. Toàn bộ dữ liệu nằm gọn trong layout struct gốc của engine.
 2. **Bảo toàn 100% `m_zoneGrid` (`ushort[]`):** Nhờ cơ chế Dual-Pool + Tail-Chaining, con trỏ đầu ô đất luôn là số 16-bit ($< 65.536$). Cả $65.536$ blocks mở rộng ($65.536..131.071$) đều nép mình sau Head thông qua con trỏ 17-bit cực kỳ trơn tru.
