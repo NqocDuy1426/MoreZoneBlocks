@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using ColossalFramework;
+using ColossalFramework.Packaging;
 using HarmonyLib;
 using UnityEngine;
 
@@ -212,9 +213,58 @@ namespace MoreZoneBlocks.Core128K
         // GIAI ĐOẠN NẠP GAME (LOAD PIPELINE)
         // =====================================================================
 
+        public static bool s_isLegacy64KSave = false;
+
+        public static void DetectLegacySave(Package.Asset asset)
+        {
+            s_isLegacy64KSave = false;
+            try
+            {
+                if (asset?.package != null)
+                {
+                    foreach (Package.Asset pAsset in asset.package)
+                    {
+                        if (pAsset.type == UserAssetType.SaveGameMetaData)
+                        {
+                            SaveGameMetaData meta = pAsset.Instantiate<SaveGameMetaData>();
+                            if (meta?.mods != null)
+                            {
+                                for (int i = 0; i < meta.mods.Length; i++)
+                                {
+                                    string modName = meta.mods[i].modName;
+                                    ulong id = meta.mods[i].modWorkshopID;
+                                    if (modName == "MoreZoneBlocks" || id == 3835327455UL)
+                                    {
+                                        s_isLegacy64KSave = true;
+                                        CODebugBase<LogChannel>.Log(LogChannel.Serialization, "[MoreZoneBlocks] DetectLegacySave: Found MoreZoneBlocks v1.0 (64K) in SaveGameMetaData: " + modName + " (WorkshopID=" + id + ")");
+                                        return;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                CODebugBase<LogChannel>.Log(LogChannel.Serialization, "[MoreZoneBlocks] DetectLegacySave exception: " + ex.Message);
+            }
+        }
+
+        [HarmonyPatch(typeof(LoadingManager), "LoadSimulationData")]
+        [HarmonyPrefix]
+        public static void LoadSimulationData_Prefix(Package.Asset asset)
+        {
+            DetectLegacySave(asset);
+        }
+
         /// <summary>
         /// L1. Prefix ZoneManager.Data.Deserialize:
-        /// Thu tạm m_blocks.m_buffer về 49.152 phần tử để Vanilla Deserialize đọc khớp 100% luồng 48K gốc!
+        /// Tự động thích ứng buffer size:
+        /// - Save v2.0 (có Sidecar): buffer = 49.152 (Vanilla stream sạch).
+        /// - Save v1.0 (MoreZoneBlocks 64K cũ): buffer = 65.536 (đọc đủ 64K block từ main stream, tránh lệch stream 30KB!).
+        /// - Save Vanilla: buffer = 49.152 (Vanilla stream chuẩn).
         /// </summary>
         [HarmonyPatch(typeof(ZoneManager.Data), "Deserialize")]
         [HarmonyPrefix]
@@ -223,9 +273,27 @@ namespace MoreZoneBlocks.Core128K
             ZoneManager zm = ZoneManager.instance;
             if (zm == null) return;
 
-            zm.m_blocks.m_buffer = new ZoneBlock[49152];
+            SimulationManager sm = Singleton<SimulationManager>.instance;
+            bool hasV2Sidecar = (sm?.m_serializableDataStorage != null && sm.m_serializableDataStorage.ContainsKey(SIDECAR_KEY));
+
+            uint targetSize = 49152u;
+            if (hasV2Sidecar)
+            {
+                targetSize = 49152u; // v2.0 save: sidecar takes care of high blocks, main stream is clean 48K
+            }
+            else if (s_isLegacy64KSave)
+            {
+                targetSize = 65536u; // v1.0 save: main stream contains 64K blocks!
+            }
+            else
+            {
+                targetSize = 49152u; // Vanilla save: 48K
+            }
+
+            zm.m_blocks.m_buffer = new ZoneBlock[targetSize];
             FieldInfo fSize = AccessTools.Field(typeof(Array16<ZoneBlock>), "m_size");
-            fSize?.SetValue(zm.m_blocks, 49152u);
+            fSize?.SetValue(zm.m_blocks, targetSize);
+            CODebugBase<LogChannel>.Log(LogChannel.Serialization, "[MoreZoneBlocks] ZoneManager.Data.Deserialize: Set buffer size to " + targetSize + " (isLegacy64K=" + s_isLegacy64KSave + ", hasV2Sidecar=" + hasV2Sidecar + ")");
         }
 
         /// <summary>

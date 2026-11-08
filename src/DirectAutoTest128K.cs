@@ -25,11 +25,26 @@ namespace MoreZoneBlocks
         }
     }
 
+    public class MZBAutoTestLoadingExtension : LoadingExtensionBase
+    {
+        public override void OnLevelLoaded(LoadMode mode)
+        {
+            Log.Info("[MZBAutoTestLoadingExtension] OnLevelLoaded fired with mode: " + mode);
+            DirectAutoTestBootBehaviour.OnGameLevelLoaded();
+        }
+    }
+
     public class DirectAutoTestBootBehaviour : MonoBehaviour
     {
+        public static bool s_levelLoadedViaExtension = false;
         private bool loadTriggered = false;
         private bool testerSpawned = false;
         private float postLoadWait = 0f;
+
+        public static void OnGameLevelLoaded()
+        {
+            s_levelLoadedViaExtension = true;
+        }
 
         void Update()
         {
@@ -57,7 +72,7 @@ namespace MoreZoneBlocks
             // Once load was triggered, detect when level is loaded and spawn tester directly
             if (!testerSpawned)
             {
-                bool isLevelReady = (lm.m_loadingComplete || !lm.m_currentlyLoading) 
+                bool isLevelReady = (s_levelLoadedViaExtension || lm.m_loadingComplete || !lm.m_currentlyLoading) 
                                  && Singleton<ZoneManager>.exists 
                                  && Singleton<ZoneManager>.instance.m_blocks.m_buffer != null;
 
@@ -96,7 +111,7 @@ namespace MoreZoneBlocks
                 foreach (var comp in allComponents)
                 {
                     if (comp != null && (
-                        comp.name.Contains("Panel") || comp.name.Contains("Modal") || 
+                        comp.name.Contains("Modal") || 
                         comp.name.Contains("Dialog") || comp.name.Contains("WhatsNew") || 
                         comp.name.Contains("DLC") || comp.name.Contains("Paradox") || 
                         comp.name.Contains("Debug") || comp.name.Contains("Popup") ||
@@ -125,14 +140,33 @@ namespace MoreZoneBlocks
                 string savesDir = "/Users/nqocduy/Library/Application Support/Colossal Order/Cities_Skylines/Saves";
                 string[] files = Directory.GetFiles(savesDir, "*.crp");
                 
-                string saveFile = files.FirstOrDefault(f => f.EndsWith("dreamcity30.crp", StringComparison.OrdinalIgnoreCase))
-                               ?? files.FirstOrDefault(f => f.EndsWith("NewSave.crp", StringComparison.OrdinalIgnoreCase))
-                               ?? files.FirstOrDefault(f => f.Contains("Canalville"))
-                               ?? files.FirstOrDefault(f => f.EndsWith("backup7.crp", StringComparison.OrdinalIgnoreCase))
-                               ?? files.FirstOrDefault(f => f.Contains("backup7"))
-                               ?? files.FirstOrDefault(f => f.Contains("Quang Ninh"))
-                               ?? files.FirstOrDefault(f => f.Contains("mới"))
-                               ?? files.FirstOrDefault();
+                string requestedSave = null;
+                if (File.Exists("/Users/nqocduy/autotest_pending.txt"))
+                {
+                    string txt = File.ReadAllText("/Users/nqocduy/autotest_pending.txt").Trim();
+                    if (!string.IsNullOrEmpty(txt) && txt != "pending" && txt.EndsWith(".crp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        requestedSave = txt;
+                    }
+                }
+
+                string saveFile = null;
+                if (!string.IsNullOrEmpty(requestedSave))
+                {
+                    saveFile = files.FirstOrDefault(f => f.EndsWith(requestedSave, StringComparison.OrdinalIgnoreCase) || f.Contains(requestedSave));
+                }
+
+                if (saveFile == null)
+                {
+                    saveFile = files.FirstOrDefault(f => f.EndsWith("dreamcity30.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.EndsWith("backup7.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.EndsWith("NewSave.crp", StringComparison.OrdinalIgnoreCase))
+                            ?? files.FirstOrDefault(f => f.Contains("Canalville"))
+                            ?? files.FirstOrDefault(f => f.Contains("backup7"))
+                            ?? files.FirstOrDefault(f => f.Contains("Quang Ninh"))
+                            ?? files.FirstOrDefault(f => f.Contains("mới"))
+                            ?? files.FirstOrDefault();
+                }
 
                 if (saveFile == null)
                 {
@@ -145,6 +179,19 @@ namespace MoreZoneBlocks
                 var asset = package.Find(package.packageMainAsset);
                 
                 var saveMetaData = asset.Instantiate<SaveGameMetaData>();
+                if (saveMetaData != null && saveMetaData.mods != null)
+                {
+                    foreach (var mod in saveMetaData.mods)
+                    {
+                        if (mod.modName == "MoreZoneBlocks" || mod.modWorkshopID == 3835327455UL)
+                        {
+                            SaveSanitizer128K.s_isLegacy64KSave = true;
+                            Log.Info("[MZB_DirectAutoTest] Detected legacy 64K save (MoreZoneBlocks v1.0) in saveMetaData!");
+                            break;
+                        }
+                    }
+                }
+
                 string environment = saveMetaData != null ? saveMetaData.environment : null;
                 if (string.IsNullOrEmpty(environment))
                     environment = "Sunny";
@@ -158,6 +205,8 @@ namespace MoreZoneBlocks
                 
                 // IMPORTANT: Scene 1 is "Game", Scene 2 (UI) MUST be "InGame"
                 var targetAsset = (saveMetaData != null && saveMetaData.assetRef != null) ? saveMetaData.assetRef : asset;
+                SaveSanitizer128K.DetectLegacySave(targetAsset);
+
                 Singleton<LoadingManager>.instance.LoadLevel(targetAsset, "Game", "InGame", meta, false);
                 Log.Info("[MZB_DirectAutoTest] >>> LoadLevel(..., 'Game', 'InGame') invoked directly! Bypassed all popups.");
             }
@@ -190,10 +239,11 @@ namespace MoreZoneBlocks
         {
             if (type == LogType.Exception || type == LogType.Error)
             {
-                if (condition.Contains("Zone") || condition.Contains("MoreZoneBlocks") ||
-                    condition.Contains("IndexOutOfRange") || condition.Contains("ArgumentOutOfRange") ||
-                    condition.Contains("NullReferenceException") || condition.Contains("InvalidProgramException") ||
-                    condition.Contains("Harmony"))
+                bool isZoneRelated = condition.Contains("Zone") || condition.Contains("MoreZoneBlocks") ||
+                                     condition.Contains("BitStash") || condition.Contains("DualPool") ||
+                                     (stackTrace != null && (stackTrace.Contains("Zone") || stackTrace.Contains("MoreZoneBlocks")));
+
+                if (isZoneRelated)
                 {
                     // Ignore non-zone benign errors from unrelated mods like FPSCamera or TMPE localization
                     if (!condition.Contains("FPSCamera") && !condition.Contains("translation") && !condition.Contains("locale"))
