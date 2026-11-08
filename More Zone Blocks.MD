@@ -274,13 +274,13 @@ namespace MoreZoneBlocks.Core128K
         }
 
         // =====================================================================
-        // 2. ĐỌC / GHI 4 CON TRỎ 17-BIT TRONG NETSEGMENT
+        // 2. ĐỌC / GHI 4 CON TRỎ 17-BIT TRONG NETSEGMENT (CHỐNG TRÔI BIT DẤU SIGN-EXTENSION)
         // =====================================================================
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint GetStartLeft32(ref NetSegment seg)
         {
-            return (uint)seg.m_blockStartLeft | (((uint)(seg.m_flags2 & SEG_START_LEFT_HIGH)) >> 12);
+            return (uint)seg.m_blockStartLeft | ((((uint)seg.m_flags2) & 0x10000000u) >> 12);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -288,13 +288,13 @@ namespace MoreZoneBlocks.Core128K
         {
             seg.m_blockStartLeft = (ushort)(blockID & LOW_16_MASK);
             if (blockID >= HIGH_BIT_VALUE) seg.m_flags2 |= SEG_START_LEFT_HIGH;
-            else seg.m_flags2 &= ~SEG_START_LEFT_HIGH;
+            else seg.m_flags2 = (NetSegment.Flags2)((uint)seg.m_flags2 & ~0x10000000u);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint GetStartRight32(ref NetSegment seg)
         {
-            return (uint)seg.m_blockStartRight | (((uint)(seg.m_flags2 & SEG_START_RIGHT_HIGH)) >> 13);
+            return (uint)seg.m_blockStartRight | ((((uint)seg.m_flags2) & 0x20000000u) >> 13);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -302,13 +302,13 @@ namespace MoreZoneBlocks.Core128K
         {
             seg.m_blockStartRight = (ushort)(blockID & LOW_16_MASK);
             if (blockID >= HIGH_BIT_VALUE) seg.m_flags2 |= SEG_START_RIGHT_HIGH;
-            else seg.m_flags2 &= ~SEG_START_RIGHT_HIGH;
+            else seg.m_flags2 = (NetSegment.Flags2)((uint)seg.m_flags2 & ~0x20000000u);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint GetEndLeft32(ref NetSegment seg)
         {
-            return (uint)seg.m_blockEndLeft | (((uint)(seg.m_flags2 & SEG_END_LEFT_HIGH)) >> 14);
+            return (uint)seg.m_blockEndLeft | ((((uint)seg.m_flags2) & 0x40000000u) >> 14);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -316,13 +316,15 @@ namespace MoreZoneBlocks.Core128K
         {
             seg.m_blockEndLeft = (ushort)(blockID & LOW_16_MASK);
             if (blockID >= HIGH_BIT_VALUE) seg.m_flags2 |= SEG_END_LEFT_HIGH;
-            else seg.m_flags2 &= ~SEG_END_LEFT_HIGH;
+            else seg.m_flags2 = (NetSegment.Flags2)((uint)seg.m_flags2 & ~0x40000000u);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint GetEndRight32(ref NetSegment seg)
         {
-            return (uint)seg.m_blockEndRight | (((uint)(seg.m_flags2 & SEG_END_RIGHT_HIGH)) >> 15);
+            // BẮT BUỘC ép kiểu (uint)seg.m_flags2 trước khi AND 0x80000000u để tránh Sign-Extension
+            // trên kiểu enum có underlying type là int (signed 32-bit)!
+            return (uint)seg.m_blockEndRight | ((((uint)seg.m_flags2) & 0x80000000u) >> 15);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -330,7 +332,7 @@ namespace MoreZoneBlocks.Core128K
         {
             seg.m_blockEndRight = (ushort)(blockID & LOW_16_MASK);
             if (blockID >= HIGH_BIT_VALUE) seg.m_flags2 |= SEG_END_RIGHT_HIGH;
-            else seg.m_flags2 &= ~SEG_END_RIGHT_HIGH;
+            else seg.m_flags2 = (NetSegment.Flags2)((uint)seg.m_flags2 & ~0x80000000u);
         }
     }
 }
@@ -509,9 +511,29 @@ namespace MoreZoneBlocks.Core128K
                 {
                     if (prevID == 0u)
                     {
-                        // Nếu xóa đúng Head (và node kế tiếp chẳng may >= 65536),
-                        // đưa node < 65536 kế tiếp lên làm Head mới để bảo toàn ushort!
-                        zm.m_zoneGrid[cellIndex] = (ushort)(nextID < 65536u ? nextID : PromoteLowNodeToHead(zm, nextID));
+                        // Xóa đúng Head của ô lưới
+                        if (nextID < 65536u)
+                        {
+                            // Node kế tiếp là 16-bit: Gán thẳng làm Head mới
+                            zm.m_zoneGrid[cellIndex] = (ushort)nextID;
+                        }
+                        else
+                        {
+                            // Node kế tiếp >= 65536: Thử tìm xem có node 16-bit nào ở sâu trong chuỗi không
+                            ushort promotedLowID = PromoteLowNodeToHead(zm, nextID);
+                            if (promotedLowID != 0)
+                            {
+                                zm.m_zoneGrid[cellIndex] = promotedLowID;
+                            }
+                            else
+                            {
+                                // TÌNH HUỐNG HIỂM NGHÈO (Lỗ hổng 2): Phía sau KHÔNG CÒN node 16-bit nào!
+                                // Cứu chuỗi tức thì bằng In-Place Relocation:
+                                // Di dời node nextID (>= 65536) thế chỗ vào đúng slot 16-bit vừa giải phóng (blockID)!
+                                zm.m_zoneGrid[cellIndex] = RelocateHighNodeIntoReleasedLowHead(zm, (ushort)blockID, nextID);
+                                return; // Slot blockID đã được tái sử dụng làm Head mới, không xóa trắng data
+                            }
+                        }
                     }
                     else
                     {
@@ -529,8 +551,7 @@ namespace MoreZoneBlocks.Core128K
         }
 
         /// <summary>
-        /// Trường hợp hiếm: Khi xóa Head 16-bit mà phần tử kế tiếp là >= 65536,
-        /// tìm phần tử 16-bit đầu tiên trong chuỗi đưa lên làm Head mới.
+        /// Trường hợp tìm node 16-bit sâu trong chuỗi để đôn lên làm Head mới.
         /// </summary>
         private static ushort PromoteLowNodeToHead(ZoneManager zm, uint startHighID)
         {
@@ -553,6 +574,38 @@ namespace MoreZoneBlocks.Core128K
             }
             return 0;
         }
+
+        /// <summary>
+        /// Giải pháp chống mồ côi chuỗi 17-bit khi xóa Head 16-bit duy nhất trong ô lưới (Vá Lỗ hổng 2):
+        /// Di dời (Relocate) block >= 65536 kế tiếp vào thẳng slot 16-bit vừa giải phóng!
+        /// </summary>
+        private static ushort RelocateHighNodeIntoReleasedLowHead(ZoneManager zm, ushort releasedLowHeadID, uint highNextID)
+        {
+            ref ZoneBlock highBlock = ref zm.m_blocks.m_buffer[highNextID];
+            uint afterHighID = BitStash128K.GetNextGridBlock32(ref highBlock);
+
+            // 1. Copy toàn bộ dữ liệu của highBlock sang vị trí releasedLowHeadID
+            zm.m_blocks.m_buffer[releasedLowHeadID] = highBlock;
+            BitStash128K.SetNextGridBlock32(ref zm.m_blocks.m_buffer[releasedLowHeadID], afterHighID);
+
+            // 2. Cập nhật lại con trỏ trên NetSegment đang sở hữu highNextID sang địa chỉ mới (releasedLowHeadID)
+            ushort segID = highBlock.m_segment;
+            if (segID != 0 && NetManager.exists)
+            {
+                ref NetSegment seg = ref NetManager.instance.m_segments.m_buffer[segID];
+                if (BitStash128K.GetStartLeft32(ref seg) == highNextID)  BitStash128K.SetStartLeft32(ref seg, releasedLowHeadID);
+                if (BitStash128K.GetStartRight32(ref seg) == highNextID) BitStash128K.SetStartRight32(ref seg, releasedLowHeadID);
+                if (BitStash128K.GetEndLeft32(ref seg) == highNextID)    BitStash128K.SetEndLeft32(ref seg, releasedLowHeadID);
+                if (BitStash128K.GetEndRight32(ref seg) == highNextID)   BitStash128K.SetEndRight32(ref seg, releasedLowHeadID);
+            }
+
+            // 3. Xóa trắng slot highNextID cũ và trả highNextID về High Pool
+            highBlock = default(ZoneBlock);
+            DualPoolAllocator128K.ReleaseBlockId32(highNextID);
+
+            // Trả về chính releasedLowHeadID làm Head mới của ô lưới!
+            return releasedLowHeadID;
+        }
     }
 }
 ```
@@ -568,6 +621,8 @@ namespace MoreZoneBlocks.Core128K
    - Tạm thời gạt bỏ các bit cờ `0xF0000000u` trong `NetSegment.m_flags2` và `0x00010000u` trong `ZoneBlock.m_flags`.
    - Lưu toàn bộ các block từ $49.152$ đến $131.071$ vào Sidecar Stream `MoreZoneBlocks_Extended_128K`.
    - File save mở ở máy không cài mod sẽ hoàn toàn sạch sẽ, không crash!
+5. **Miễn Nhiễm Với Lỗi Trôi Bit Dấu (Sign-Extension Immune):** Bằng cách ép kiểu `(uint)seg.m_flags2` trước các phép toán AND và dịch bit, bit 31 (`0x80000000u`) không bao giờ bị CPU xử lý như số âm có dấu (Arithmetic Shift), loại bỏ hoàn toàn nguy cơ tràn số âm.
+6. **Chống Zombie Blocks Tuyệt Đối Nhờ In-Place Relocation:** Khi người chơi đập đường làm mất Head 16-bit duy nhất trong ô đất, hàm `RelocateHighNodeIntoReleasedLowHead` lập tức di dời node $\ge 65.536$ kế tiếp sang thế chỗ vào ID 16-bit vừa giải phóng, bảo toàn trọn vẹn chuỗi liên kết mà không bao giờ bỏ rơi các block 17-bit phía sau.
 
 ---
 
