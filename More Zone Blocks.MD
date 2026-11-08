@@ -828,7 +828,155 @@ namespace MoreZoneBlocks.Core128K
 
 ---
 
-### 6.7 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
+### 6.7 Mã Nguồn Lõi 5: `RoadAICreateZoneBlocksTranspiler128K.cs` (Chuyển Hướng RoadAI.CreateZoneBlocks Sang 17-Bit Bằng Transpiler IL)
+
+#### Tại sao dùng Transpiler cho `RoadAI.CreateZoneBlocks` là nước đi tối ưu nhất?
+1. **Không phải viết lại toán học Bezier:** Hàm `RoadAI.CreateZoneBlocks(ushort segment, ref NetSegment data)` gốc của game dài hơn 300 dòng tính toán đường cong Bezier, độ dốc địa hình và góc xoay rất phức tạp.
+2. **Bảo toàn 100% khả năng tương thích với *Zoning Adjuster* (của algernon) và *Network Anarchy*:** Các mod này can thiệp trực tiếp vào `RoadAI.CreateZoneBlocks` để tùy biến khoảng cách lùi lề (setback). Việc dùng Prefix để viết lại từ đầu sẽ triệt tiêu các tính năng của *Zoning Adjuster*.
+3. **Kỹ thuật thay thế IL thanh lịch (`ldflda` $\rightarrow$ `Nop`):**
+   Trong mã IL gốc, trước khi gọi `zm.CreateBlock(out data.m_blockStartLeft, ...)`, engine đẩy con trỏ `ref NetSegment data` (`ldarg.2`) lên stack, rồi gọi `ldflda NetSegment::m_blockStartLeft` để lấy con trỏ `ref ushort`.
+   Khi Transpiler thay thế lệnh `ldflda` bằng `OpCodes.Nop`, trên đỉnh stack vẫn là con trỏ `ref NetSegment data` nguyên vẹn!
+   Nhờ đó, hàm wrapper nhận trực tiếp `ref NetSegment seg` để vừa ghi ID 16-bit thấp vào `m_blockStartLeft..EndRight`, vừa bật bit thứ 17 tương ứng trong `m_flags2`!
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
+using ColossalFramework.Math;
+using HarmonyLib;
+using UnityEngine;
+
+namespace MoreZoneBlocks.Core128K
+{
+    /// <summary>
+    /// Mã Nguồn Lõi 5: Chuyển hướng 4 lệnh gọi CreateBlock trong RoadAI.CreateZoneBlocks
+    /// sang hệ thống 17-bit Bit-Stashing mà giữ nguyên 100% tương thích với Zoning Adjuster!
+    /// </summary>
+    [HarmonyPatch(typeof(RoadAI), "CreateZoneBlocks")]
+    public static class RoadAICreateZoneBlocksTranspiler128K
+    {
+        // 4 hàm bọc (Wrappers) thay thế cho ZoneManager.CreateBlock tại 4 vị trí của NetSegment:
+        public static bool CreateStartLeft128K(
+            ZoneManager zm, ref NetSegment seg, ref Randomizer r,
+            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+        {
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            {
+                BitStash128K.SetStartLeft32(ref seg, id32);
+                return true;
+            }
+            return false;
+        }
+
+        public static bool CreateStartRight128K(
+            ZoneManager zm, ref NetSegment seg, ref Randomizer r,
+            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+        {
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            {
+                BitStash128K.SetStartRight32(ref seg, id32);
+                return true;
+            }
+            return false;
+        }
+
+        public static bool CreateEndLeft128K(
+            ZoneManager zm, ref NetSegment seg, ref Randomizer r,
+            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+        {
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            {
+                BitStash128K.SetEndLeft32(ref seg, id32);
+                return true;
+            }
+            return false;
+        }
+
+        public static bool CreateEndRight128K(
+            ZoneManager zm, ref NetSegment seg, ref Randomizer r,
+            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+        {
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            {
+                BitStash128K.SetEndRight32(ref seg, id32);
+                return true;
+            }
+            return false;
+        }
+
+        [HarmonyTranspiler]
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var codes = new List<CodeInstruction>(instructions);
+
+            FieldInfo fStartLeft  = AccessTools.Field(typeof(NetSegment), nameof(NetSegment.m_blockStartLeft));
+            FieldInfo fStartRight = AccessTools.Field(typeof(NetSegment), nameof(NetSegment.m_blockStartRight));
+            FieldInfo fEndLeft    = AccessTools.Field(typeof(NetSegment), nameof(NetSegment.m_blockEndLeft));
+            FieldInfo fEndRight   = AccessTools.Field(typeof(NetSegment), nameof(NetSegment.m_blockEndRight));
+
+            MethodInfo mOrigCreate = AccessTools.Method(typeof(ZoneManager), nameof(ZoneManager.CreateBlock));
+
+            MethodInfo mWrapSL = AccessTools.Method(typeof(RoadAICreateZoneBlocksTranspiler128K), nameof(CreateStartLeft128K));
+            MethodInfo mWrapSR = AccessTools.Method(typeof(RoadAICreateZoneBlocksTranspiler128K), nameof(CreateStartRight128K));
+            MethodInfo mWrapEL = AccessTools.Method(typeof(RoadAICreateZoneBlocksTranspiler128K), nameof(CreateEndLeft128K));
+            MethodInfo mWrapER = AccessTools.Method(typeof(RoadAICreateZoneBlocksTranspiler128K), nameof(CreateEndRight128K));
+
+            MethodInfo pendingReplacement = null;
+
+            for (int i = 0; i < codes.Count; i++)
+            {
+                var inst = codes[i];
+
+                // Khi gặp lệnh lấy địa chỉ trường ushort (ldflda m_blockStartLeft...),
+                // ta đổi nó thành Nop để giữ nguyên con trỏ `ref NetSegment data` (ldarg.2) trên đỉnh Stack!
+                if (inst.opcode == OpCodes.Ldflda)
+                {
+                    if (Equals(inst.operand, fStartLeft))
+                    {
+                        inst.opcode = OpCodes.Nop;
+                        inst.operand = null;
+                        pendingReplacement = mWrapSL;
+                    }
+                    else if (Equals(inst.operand, fStartRight))
+                    {
+                        inst.opcode = OpCodes.Nop;
+                        inst.operand = null;
+                        pendingReplacement = mWrapSR;
+                    }
+                    else if (Equals(inst.operand, fEndLeft))
+                    {
+                        inst.opcode = OpCodes.Nop;
+                        inst.operand = null;
+                        pendingReplacement = mWrapEL;
+                    }
+                    else if (Equals(inst.operand, fEndRight))
+                    {
+                        inst.opcode = OpCodes.Nop;
+                        inst.operand = null;
+                        pendingReplacement = mWrapER;
+                    }
+                }
+                else if (pendingReplacement != null && 
+                         (inst.opcode == OpCodes.Call || inst.opcode == OpCodes.Callvirt) && 
+                         Equals(inst.operand, mOrigCreate))
+                {
+                    // Thay thế lời gọi ZoneManager.CreateBlock bằng Wrapper 17-bit tương ứng
+                    inst.opcode = OpCodes.Call;
+                    inst.operand = pendingReplacement;
+                    pendingReplacement = null;
+                }
+
+                yield return inst;
+            }
+        }
+    }
+}
+```
+
+---
+
+### 6.8 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
 
 1. **0 Byte Mảng Phụ Ngoại Lai:** Không cần tạo thêm bất kỳ mảng `uint[]` nào cho `NetSegment` hay `m_zoneGrid`. Toàn bộ dữ liệu nằm gọn trong layout struct gốc của engine.
 2. **Bảo toàn 100% `m_zoneGrid` (`ushort[]`):** Nhờ cơ chế Dual-Pool + Tail-Chaining, con trỏ đầu ô đất luôn là số 16-bit ($< 65.536$). Cả $65.536$ blocks mở rộng ($65.536..131.071$) đều nép mình sau Head thông qua con trỏ 17-bit cực kỳ trơn tru.
