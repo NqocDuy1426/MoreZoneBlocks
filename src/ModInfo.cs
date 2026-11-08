@@ -1,15 +1,17 @@
 using System;
+using System.Reflection;
 using ICities;
 using CitiesHarmony.API;
 using HarmonyLib;
+using MoreZoneBlocks.Core128K;
 
 namespace MoreZoneBlocks
 {
     public sealed class ModInfo : IUserMod
     {
-        public const string HARMONY_ID = "com.ngocduy.morezoneblocks";
-        public const string MOD_NAME = "More Zone Blocks v1.0 by NgocDuy";
-        public const string MOD_DESCRIPTION = "Expands Zone Block capacity from 48K to 64K (65,535 blocks) with Two-Stream Vanilla Save Preservation, 64-block simulation pacing, and Simulation-thread safe GC. By NgocDuy.";
+        public const string HARMONY_ID = "com.ngocduy.morezoneblocks2";
+        public const string MOD_NAME = "More Zone Blocks 2 BETA by NgocDuy";
+        public const string MOD_DESCRIPTION = "Doubles Zone Block capacity to 128K (131,072 blocks) with 17-Bit Bit-Stashing, Tail-Chained m_zoneGrid, and Sidecar Stream save preservation. By NgocDuy.";
 
         public string Name => MOD_NAME;
         public string Description => MOD_DESCRIPTION;
@@ -42,8 +44,15 @@ namespace MoreZoneBlocks
                 return;
             }
 
-            Log.Info("Game level loaded. Verifying MoreZoneBlocks expansion state...");
-            ZoneCustomizer.EnsureExpanded(ColossalFramework.Singleton<ZoneManager>.instance);
+            Log.Info("Game level loaded. Verifying MoreZoneBlocks 128K expansion state...");
+            if (ColossalFramework.Singleton<ZoneManager>.exists)
+            {
+                ZoneManager zm = ColossalFramework.Singleton<ZoneManager>.instance;
+                if (zm.m_blocks.m_buffer == null || zm.m_blocks.m_buffer.Length < BitStash128K.MAX_BLOCK_COUNT)
+                {
+                    ZoneUpdateAndSim128K.Awake_Postfix(zm);
+                }
+            }
         }
     }
 
@@ -57,14 +66,14 @@ namespace MoreZoneBlocks
 
             try
             {
-                Log.Info("Applying MoreZoneBlocks Harmony patches...");
+                Log.Info("Applying MoreZoneBlocks 2 BETA (128K) Harmony patches...");
                 Harmony harmony = new Harmony(ModInfo.HARMONY_ID);
 
-                ZonePatches.Apply(harmony);
-                LoopGuardPatches.Apply(harmony);
+                // Tự động quét và kích hoạt toàn bộ các patch Harmony trong Assembly (các module Core128K)
+                harmony.PatchAll(Assembly.GetExecutingAssembly());
 
                 s_isPatched = true;
-                Log.Info("MoreZoneBlocks Harmony patches applied successfully.");
+                Log.Info("MoreZoneBlocks 2 BETA (128K) Harmony patches applied successfully.");
             }
             catch (Exception ex)
             {
@@ -90,4 +99,3 @@ namespace MoreZoneBlocks
         }
     }
 }
-

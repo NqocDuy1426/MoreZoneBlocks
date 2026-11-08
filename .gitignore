@@ -4,8 +4,10 @@
 bin/
 obj/
 content/
+content_beta/
 *.suo
 *.user
 .DS_Store
 upload_workshop.sh
+upload_workshop_beta.sh
 

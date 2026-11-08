@@ -6,7 +6,9 @@ cd "$SCRIPT_DIR"
 
 GAME_DIR="$HOME/Library/Application Support/Steam/steamapps/common/Cities_Skylines/Cities.app/Contents/Resources/Data/Managed"
 MOD_NAME="MoreZoneBlocks"
-MOD_DIR="$HOME/Library/Application Support/Colossal Order/Cities_Skylines/Addons/Mods/$MOD_NAME"
+MOD_DISPLAY_NAME="More Zone Blocks 2 BETA"
+MOD_DIR="$HOME/Library/Application Support/Colossal Order/Cities_Skylines/Addons/Mods/MoreZoneBlocks2"
+CONTENT_DIR="$SCRIPT_DIR/content_beta"
 HARMONY_DLL="$SCRIPT_DIR/Libs/CitiesHarmony.Harmony.dll"
 CITIES_HARMONY_API_DLL="$SCRIPT_DIR/Libs/CitiesHarmony.API.dll"
 CECIL_DLL="/Library/Frameworks/Mono.framework/Versions/6.12.0/lib/mono/gac/Mono.Cecil/0.11.1.0__0738eb9f132ed756/Mono.Cecil.dll"
@@ -25,7 +27,7 @@ mcs -sdk:2 -target:library \
     -r:"$HARMONY_DLL" \
     -r:"$CITIES_HARMONY_API_DLL" \
     -out:"$MOD_NAME.dll" \
-    src/*.cs
+    src/*.cs src/Core128K/*.cs
 
 echo "✅ Compiled $MOD_NAME.dll successfully."
 
@@ -42,26 +44,17 @@ cp "$MOD_NAME.dll" "$MOD_DIR/"
 cp "$CITIES_HARMONY_API_DLL" "$MOD_DIR/"
 [ -f preview-image.png ] && cp preview-image.png "$MOD_DIR/"
 
-# 4. Deploy to SteamCMD content staging
-echo "4️⃣ Deploying to SteamCMD content staging ($SCRIPT_DIR/content)..."
-mkdir -p "$SCRIPT_DIR/content"
-cp "$MOD_NAME.dll" "$SCRIPT_DIR/content/"
-cp "$CITIES_HARMONY_API_DLL" "$SCRIPT_DIR/content/"
-[ -f preview-image.png ] && cp preview-image.png "$SCRIPT_DIR/content/PreviewImage.png"
-
-# 5. Deploy to Steam Workshop directory if subscribed
-WORKSHOP_DIR="$HOME/Library/Application Support/Steam/steamapps/workshop/content/255710/3835327455"
-if [ -d "$WORKSHOP_DIR" ]; then
-    echo "5️⃣ Deploying to Steam Workshop staging ($WORKSHOP_DIR)..."
-    cp "$MOD_NAME.dll" "$WORKSHOP_DIR/"
-    cp "$CITIES_HARMONY_API_DLL" "$WORKSHOP_DIR/"
-    [ -f preview-image.png ] && cp preview-image.png "$WORKSHOP_DIR/PreviewImage.png"
-fi
+# 4. Deploy to SteamCMD content staging (Beta parallel release)
+echo "4️⃣ Deploying to SteamCMD content staging ($CONTENT_DIR)..."
+mkdir -p "$CONTENT_DIR"
+cp "$MOD_NAME.dll" "$CONTENT_DIR/"
+cp "$CITIES_HARMONY_API_DLL" "$CONTENT_DIR/"
+[ -f preview-image.png ] && cp preview-image.png "$CONTENT_DIR/PreviewImage.png"
 
 echo "=========================================================="
 echo "🎉 DEPLOYMENT COMPLETE!"
 echo "Files in $MOD_DIR:"
 ls -lh "$MOD_DIR"
-echo "Files in $SCRIPT_DIR/content:"
-ls -lh "$SCRIPT_DIR/content"
+echo "Files in $CONTENT_DIR:"
+ls -lh "$CONTENT_DIR"
 echo "=========================================================="

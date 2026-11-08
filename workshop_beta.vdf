@@ -1,0 +1,90 @@
+"workshopitem"
+{
+	"appid"		"255710"
+	"publishedfileid"		"3836127897"
+	"contentfolder"		"/Users/nqocduy/CS_MoreZoneBlocks/content_beta"
+	"previewfile"		"/Users/nqocduy/CS_MoreZoneBlocks/preview-image.png"
+	"visibility"		"0"
+	"title"		"More Zone Blocks 2 BETA (128K)"
+	"description"		"[h1]🏗️ MORE ZONE BLOCKS 2 BETA (128K) 🏗️[/h1]
+[b]The Ultimate 128K Zone Block Capacity Mod for Cities: Skylines[/b]
+[i]Engineered with 17-Bit Bit-Stashing Architecture, Tail-Chained Spatial Grid, and Two-Stream Save Preservation by NgocDuy[/i]
+
+[hr][/hr]
+
+[h1]🌟 WHAT IS MORE ZONE BLOCKS 2 BETA?[/h1]
+Have you ever hit the invisible [b]Zone Block limit[/b] while building massive sprawling cities, regional networks, or using [b]81 Tiles 2[/b]?
+[list]
+[*] [b]Vanilla Limit:[/b] 49,152 Zone Blocks (48K)
+[*] [b]More Zone Blocks v1.0:[/b] 65,535 Zone Blocks (64K)
+[*] [b]More Zone Blocks 2 BETA:[/b] [b]131,072 Zone Blocks (128K) — +166.7% over Vanilla![/b]
+[/list]
+
+When building extensive road networks, every segment spawns up to 4 Zone Blocks. Vanilla exhausts its 49,152 quota quickly. More Zone Blocks v1.0 expanded it to the 16-bit ceiling (65,535).
+[b]More Zone Blocks 2 BETA shatters the 16-bit barrier[/b], doubling capacity to [b]131,072 Zone Blocks (128K)[/b] using revolutionary [b]17-Bit Bit-Stashing[/b]!
+
+[hr][/hr]
+
+[h1]⚡ REVOLUTIONARY 128K ARCHITECTURAL HIGHLIGHTS[/h1]
+
+[list]
+[*] [b]17-Bit Bit-Stashing (Zero Struct Padding, Zero Memory Overhead):[/b]
+    Instead of rewriting core game structs (which would break every other mod), we safely stash the 17th bit (0x10000 = +65,536) in unused high bits:
+    - [b]ZoneBlock.m_flags Bit 16[/b] (0x00010000) stores the 17th bit of [i]m_nextGridBlock[/i].
+    - [b]NetSegment.m_flags2 Bits 28–31[/b] store the 17th bits of [i]m_blockStartLeft[/i], [i]m_blockStartRight[/i], [i]m_blockEndLeft[/i], and [i]m_blockEndRight[/i].
+    - Memory layout remains 100% binary-compatible with the game engine!
+
+[*] [b]Tail-Chaining & Head-Reservation (Safe Spatial Grid):[/b]
+    Game's spatial hash grid ([i]m_zoneGrid[/i]) is an array of [b]ushort[/b] (16-bit).
+    We guarantee the [b]Head node of every grid cell is ALWAYS < 65,536[/b] (Low Pool).
+    All extended blocks $\ge 65,536$ (High Pool) are linked immediately after the Head ([b]Tail-Chaining[/b]), keeping [i]m_zoneGrid[/i] 100% compliant without struct resizing.
+
+[*] [b]In-Place Relocation (Zero Zombie Blocks):[/b]
+    If a road deletion unlinks the sole 16-bit Head node in a grid cell, the system instantly relocates the subsequent 17-bit block into the vacated 16-bit slot, updating NetSegment pointers in O(1) time and preventing dangling pointers.
+
+[*] [b]Universal 17-Bit IL Traversal Transpiler:[/b]
+    Replaces 16-bit [i]ldfld m_nextGridBlock[/i] with [b]BitStash128K.GetNextGridBlock32[/b] and expands loop guards from 49,152 to 131,072 across 16 critical methods in [i]ZoneBlock[/i], [i]ZoneManager[/i], [i]Building[/i], [i]BuildingTool[/i], and [i]ZoneTool[/i].
+
+[*] [b]128-Block Simulation Pacing (100% Simulation Coverage):[/b]
+    Simulation pacing expanded from 48 blocks/frame to [b]128 blocks/frame ($1,024 \times 128 = 131,072$)[/b]. Every single zone block across the entire 128K pool receives active simulation ticks, ensuring natural building growth and despawn.
+
+[*] [b]Two-Stream Save Preservation & 100% Backward Compatibility:[/b]
+    - [b]Vanilla Safety:[/b] Saves a clean 49,152 slice into the vanilla stream. Savegames can still be safely loaded even without mods!
+    - [b]128K Sidecar Stream (MZB2):[/b] Blocks 49,152..131,071 and their 17-bit segment linkages are safely stored in custom Sidecar storage.
+    - [b]v1.0 Compatible:[/b] Seamlessly loads existing More Zone Blocks v1.0 saves (MZB1) and upgrades them to 128K automatically!
+
+[*] [b]Simulation-Thread Safe Auto-GC:[/b]
+    17-bit aware background garbage collector safely purges unzoned blocks on non-zonable highways, freeways, elevated viaducts, and rail corridors.
+[/list]
+
+[hr][/hr]
+
+[h1]🧩 COMPATIBILITY[/h1]
+Tested and 100% compatible with the modern modding ecosystem:
+[list]
+[*] [b]Harmony 2.2+[/b] (CitiesHarmony)
+[*] [b]81 Tiles 2[/b] (Fully compatible: auto-adapts to 270x270 spatial grid)
+[*] [b]More Nodes/Segments (64K)[/b]
+[*] [b]Zoning Adjuster[/b] (Full compatibility preserved via IL-level Transpilers)
+[*] [b]Network Anarchy[/b]
+[*] [b]Move It[/b]
+[*] [b]Find It! 2[/b]
+[*] [b]Plop the Growables & Ploppable RICO Revisited[/b]
+[*] [b]TM:PE (Traffic Manager)[/b]
+[*] [b]Adaptive Roads & Network Skins[/b]
+[*] [b]More Props BETA / More Props[/b]
+[*] [b]More Vehicles Renew[/b]
+[/list]
+
+[hr][/hr]
+
+[h1]📋 REQUIREMENTS[/h1]
+[list]
+[*] [url=https://steamcommunity.com/workshop/filedetails/?id=2040656402]Harmony 2.2.2-0 (CitiesHarmony)[/url]
+[/list]
+
+[hr][/hr]
+
+[i]Developed with precision and care for the Cities: Skylines community by NgocDuy.[/i]"
+	"changenote"		"Initial release of More Zone Blocks 2 BETA with 128K (131,072) Zone Block capacity, 17-bit Bit-Stashing architecture, and 128-block simulation pacing."
+}

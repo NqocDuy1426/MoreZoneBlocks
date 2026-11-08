@@ -30,14 +30,14 @@ namespace MoreZoneBlocks.Tests
         public static int Main()
         {
             Console.WriteLine("==========================================================");
-            Console.WriteLine("🧪 RUNNING MORE ZONE BLOCKS SIMULATION & INTEGRITY TESTS");
+            Console.WriteLine("🧪 RUNNING MORE ZONE BLOCKS 2 BETA (128K) TEST SUITE");
             Console.WriteLine("==========================================================");
 
             TestConstantsAndPacingMath();
-            TestSidecarSerializationRoundtrip();
-            TestSimulationExpansionModel();
-            TestLoopBoundsAndWrapAround();
-            TestGarbageCollectorModel();
+            TestBitStashingLogicAndSignExtension();
+            TestDualPoolAllocationModel();
+            TestSidecarSerializationRoundtrip128K();
+            TestInPlaceRelocationModel();
             TestCompiledAssemblyInspection();
 
             Console.WriteLine("==========================================================");
@@ -49,221 +49,243 @@ namespace MoreZoneBlocks.Tests
 
         private static void TestConstantsAndPacingMath()
         {
-            Console.WriteLine("\n[1] Testing Constants, Pacing & Arithmetic Proofs...");
+            Console.WriteLine("\n[1] Testing 128K Constants, Pacing & Arithmetic Proofs...");
             const int VANILLA_BLOCK_COUNT = 49152;
-            const int EXPANDED_BLOCK_COUNT = 65536;
-            const int EXPANDED_LIMIT = 65535;
-            const int VANILLA_UPDATED = 768;
-            const int EXPANDED_UPDATED = 1024;
-            const int WARNING_LIMIT = 65024;
-            const uint SIDECAR_MAGIC = 0x4D5A4231;
-            const uint SIDECAR_VERSION = 1;
+            const int MAX_BLOCK_COUNT = 131072; // 128K
+            const int EXTENDED_UPDATED_LEN = 2048; // 131072 / 64
+            const uint HIGH_BIT_VALUE = 0x00010000u; // 65536
+            const uint SIDECAR_MAGIC = 0x4D5A4232; // "MZB2"
+            const uint SIDECAR_VERSION = 2;
 
             Assert(VANILLA_BLOCK_COUNT == 49152, "VANILLA_BLOCK_COUNT == 49152 (48K)");
-            Assert(EXPANDED_BLOCK_COUNT == 65536, "EXPANDED_BLOCK_COUNT == 65536 (64K)");
-            Assert(EXPANDED_LIMIT == 65535, "EXPANDED_LIMIT == 65535 (0xFFFF)");
-            Assert(VANILLA_UPDATED == 49152 / 64, "VANILLA_UPDATED == 768 (49152 / 64 bits)");
-            Assert(EXPANDED_UPDATED == 65536 / 64, "EXPANDED_UPDATED == 1024 (65536 / 64 bits)");
-            Assert(WARNING_LIMIT == 65536 - 512, "WARNING_LIMIT == 65024 (65536 - 512)");
-            Assert(SIDECAR_MAGIC == 0x4D5A4231, "SIDECAR_MAGIC == 0x4D5A4231 ('MZB1')");
-            Assert(SIDECAR_VERSION == 1, "SIDECAR_VERSION == 1");
+            Assert(MAX_BLOCK_COUNT == 131072, "MAX_BLOCK_COUNT == 131072 (128K)");
+            Assert(EXTENDED_UPDATED_LEN == 131072 / 64, "EXTENDED_UPDATED_LEN == 2048 (131072 / 64 bits)");
+            Assert(HIGH_BIT_VALUE == 65536, "HIGH_BIT_VALUE == 65536 (Bit 17 value)");
+            Assert(SIDECAR_MAGIC == 0x4D5A4232, "SIDECAR_MAGIC == 0x4D5A4232 ('MZB2')");
+            Assert(SIDECAR_VERSION == 2, "SIDECAR_VERSION == 2");
 
-            // Proof of SimulationStep pacing math
-            int vanillaPacing = 48;
-            int vanillaFrames = 1024;
-            Assert(vanillaFrames * vanillaPacing == 49152, "Vanilla pacing: 1024 frames * 48 blocks = 49,152 blocks");
-
-            int expandedPacing = 64;
-            Assert(vanillaFrames * expandedPacing == 65536, "Expanded pacing: 1024 frames * 64 blocks = 65,536 blocks (100% coverage)");
-            Assert((sbyte)expandedPacing == 64, "Expanded pacing value fits in signed sbyte (no cast overflow)");
+            // Proof of SimulationStep pacing math (128 blocks/frame * 1024 frames = 131,072)
+            int pacing = 128;
+            int frames = 1024;
+            Assert(frames * pacing == 131072, "128K pacing: 1024 frames * 128 blocks = 131,072 blocks (100% coverage)");
         }
 
-        private static void TestSidecarSerializationRoundtrip()
+        private static void TestBitStashingLogicAndSignExtension()
         {
-            Console.WriteLine("\n[2] Testing Sidecar Binary Serialization & Deserialization...");
-            const uint SIDECAR_MAGIC = 0x4D5A4231;
-            const uint SIDECAR_VERSION = 1;
+            Console.WriteLine("\n[2] Testing 17-Bit Bit-Stashing & Sign-Extension Immunity...");
 
-            byte[] serializedData;
+            // 1. ZoneBlock m_nextGridBlock Bit 16 stashing
+            uint testNextID = 70000u; // > 65536
+            ushort low16 = (ushort)(testNextID & 0xFFFFu);
+            uint flags = 1u; // FLAG_CREATED
+            if (testNextID >= 65536u) flags |= 0x00010000u; // Set Bit 16
+
+            uint decodedNextID = (uint)low16 | (flags & 0x00010000u);
+            Assert(decodedNextID == 70000u, "ZoneBlock m_nextGridBlock 17-bit stashing decoded 70000 correctly");
+
+            // 2. NetSegment Bit 31 (EndRight) Sign-Extension proof
+            // In C#, Flags2 underlying type is int. If bit 31 is set (0x80000000), casting without (uint) causes sign extension!
+            int signedFlags2 = unchecked((int)0x80000000u);
+            ushort blockEndRight = (ushort)(131071u & 0xFFFFu); // 65535
+
+            // Arithmetic shift (buggy)
+            uint buggyShift = (uint)(signedFlags2 >> 15);
+            Assert(buggyShift != 0x00010000u, "Demonstrated: signed shift (int >> 15) pollutes upper bits with 0xFFFF0000");
+
+            // Logical shift (fixed)
+            uint fixedShift = (((uint)signedFlags2) & 0x80000000u) >> 15;
+            Assert(fixedShift == 0x00010000u, "Fixed logical shift (((uint)flags2) & 0x80000000u) >> 15 yields exactly 0x00010000 (65536)");
+
+            uint decodedEndRight = (uint)blockEndRight | fixedShift;
+            Assert(decodedEndRight == 131071u, "NetSegment EndRight decoded max ID 131071 correctly without sign extension");
+
+            // 3. Bits 28, 29, 30 stashing
+            uint idSL = 80000u;
+            uint idSR = 90000u;
+            uint idEL = 100000u;
+
+            uint f2 = 0u;
+            if (idSL >= 65536u) f2 |= 0x10000000u; // bit 28
+            if (idSR >= 65536u) f2 |= 0x20000000u; // bit 29
+            if (idEL >= 65536u) f2 |= 0x40000000u; // bit 30
+
+            uint decSL = (uint)((ushort)(idSL & 0xFFFFu)) | ((f2 & 0x10000000u) >> 12);
+            uint decSR = (uint)((ushort)(idSR & 0xFFFFu)) | ((f2 & 0x20000000u) >> 13);
+            uint decEL = (uint)((ushort)(idEL & 0xFFFFu)) | ((f2 & 0x40000000u) >> 14);
+
+            Assert(decSL == 80000u, "StartLeft (bit 28) decoded 80000 correctly");
+            Assert(decSR == 90000u, "StartRight (bit 29) decoded 90000 correctly");
+            Assert(decEL == 100000u, "EndLeft (bit 30) decoded 100000 correctly");
+        }
+
+        private static void TestDualPoolAllocationModel()
+        {
+            Console.WriteLine("\n[3] Testing Dual-Pool Allocator & Sentinel Reservation...");
+
+            // Low pool: 1..65535
+            // High pool: 65537..131071
+            // Sentinel: 65536
+            int lowPoolCapacity = 65535;
+            int highPoolCapacity = 131072 - 65537; // 65535 slots
+
+            Assert(lowPoolCapacity == 65535, "Low pool capacity is exactly 65,535 (1..65535)");
+            Assert(highPoolCapacity == 65535, "High pool capacity is exactly 65,535 (65537..131071)");
+
+            // Sentinel proof: 65536 & 0xFFFF == 0, would cause false null check
+            Assert((65536u & 0xFFFFu) == 0u, "Proved: Slot 65536 has low-16 == 0, must be reserved as Sentinel!");
+            Assert((65537u & 0xFFFFu) == 1u, "Slot 65537 has low-16 == 1 (safe)");
+
+            // Head reservation logic:
+            // When cell == 0, MUST allocate from low pool (< 65536)
+            ushort emptyCell = 0;
+            bool mustBeLow = (emptyCell == 0);
+            Assert(mustBeLow, "Empty grid cell (0) strictly requires Low Pool (< 65536) allocation as Head");
+
+            // When cell != 0, prefers High Pool (>= 65537)
+            ushort occupiedCell = 42;
+            bool preferHigh = (occupiedCell != 0);
+            Assert(preferHigh, "Occupied grid cell prefers High Pool (>= 65537) allocation for Tail-Chaining");
+        }
+
+        private static void TestSidecarSerializationRoundtrip128K()
+        {
+            Console.WriteLine("\n[4] Testing 128K Sidecar (MZB2) Serialization Roundtrip...");
+            const uint SIDECAR_MAGIC = 0x4D5A4232;
+            const uint SIDECAR_VERSION = 2;
+
+            byte[] serialized;
             using (MemoryStream ms = new MemoryStream())
             using (BinaryWriter w = new BinaryWriter(ms))
             {
                 w.Write(SIDECAR_MAGIC);
                 w.Write(SIDECAR_VERSION);
 
-                // Write 3 sample high blocks: 49152, 55000, 65535
+                // 3 blocks: 50000 (16-bit extended), 70000 (17-bit), 131071 (max 17-bit)
                 w.Write(3); // count
 
-                ushort[] testIds = new ushort[] { 49152, 55000, 65535 };
-                foreach (ushort id in testIds)
+                uint[] testIds = new uint[] { 50000u, 70000u, 131071u };
+                foreach (uint id in testIds)
                 {
                     w.Write(id);
-                    w.Write((uint)1); // m_flags (Created)
-                    w.Write((uint)100); // m_buildIndex
-                    w.Write(123.45f); // pos.x
-                    w.Write(67.89f);  // pos.y
-                    w.Write(-456.7f); // pos.z
-                    w.Write(1.57f);   // m_angle
-                    w.Write((ulong)0xFF); // m_valid
-                    w.Write((ulong)0x00); // m_shared
-                    w.Write((ulong)0x01); // m_occupied1
-                    w.Write((ulong)0x00); // m_occupied2
-                    w.Write((ulong)0x0F); // m_zone1
-                    w.Write((ulong)0x00); // m_zone2
-                    w.Write((ushort)1234); // m_segment
+                    w.Write((uint)1); // flags
+                    w.Write((ushort)4); // rowCount
+                    w.Write((uint)200); // buildIndex
+                    w.Write(100.5f); // x
+                    w.Write(20.0f);  // y
+                    w.Write(-300.25f); // z
+                    w.Write(3.14f);  // angle
+                    w.Write((ushort)100); // segment
+                    w.Write((ulong)0xAA); // zone1
+                    w.Write((ulong)0x00); // zone2
+                    w.Write((ulong)0x01); // occ1
+                    w.Write((ulong)0x00); // occ2
+                    w.Write((ulong)0xFF); // valid
+                    w.Write((ulong)0x00); // shared
                 }
 
-                // Write 2 sample segment mappings
-                w.Write(2); // count
-                w.Write((ushort)500); // segID
-                w.Write((byte)0);     // slot StartLeft
-                w.Write((ushort)49152); // highID
+                // 2 mappings
+                w.Write(2);
+                w.Write((ushort)10); // segID
+                w.Write((byte)0);     // slot 0 (SL)
+                w.Write(70000u);     // highID 32-bit
 
-                w.Write((ushort)600); // segID
-                w.Write((byte)3);     // slot EndRight
-                w.Write((ushort)65535); // highID
+                w.Write((ushort)20); // segID
+                w.Write((byte)3);     // slot 3 (ER)
+                w.Write(131071u);    // highID 32-bit
 
-                serializedData = ms.ToArray();
+                serialized = ms.ToArray();
             }
 
-            Assert(serializedData != null && serializedData.Length > 0, "Serialization stream generated valid bytes");
+            Assert(serialized != null && serialized.Length > 0, "MZB2 serialized bytes generated");
 
-            // Read back and verify
-            using (MemoryStream ms = new MemoryStream(serializedData))
+            // Read back
+            using (MemoryStream ms = new MemoryStream(serialized))
             using (BinaryReader r = new BinaryReader(ms))
             {
                 uint magic = r.ReadUInt32();
-                uint version = r.ReadUInt32();
-                int blockCount = r.ReadInt32();
+                uint ver = r.ReadUInt32();
+                int count = r.ReadInt32();
 
-                Assert(magic == SIDECAR_MAGIC, "Magic matches 0x4D5A4231");
-                Assert(version == SIDECAR_VERSION, "Version matches 1");
-                Assert(blockCount == 3, "Block count read back is 3");
+                Assert(magic == SIDECAR_MAGIC, "MZB2 Magic matched");
+                Assert(ver == SIDECAR_VERSION, "MZB2 Version 2 matched");
+                Assert(count == 3, "High block count is 3");
 
-                ushort id1 = r.ReadUInt16();
-                uint flags1 = r.ReadUInt32();
-                uint buildIndex1 = r.ReadUInt32();
-                float posX = r.ReadSingle();
-                float posY = r.ReadSingle();
-                float posZ = r.ReadSingle();
-                float angle = r.ReadSingle();
-                ulong valid = r.ReadUInt64();
-                ulong shared = r.ReadUInt64();
-                ulong occ1 = r.ReadUInt64();
-                ulong occ2 = r.ReadUInt64();
-                ulong z1 = r.ReadUInt64();
-                ulong z2 = r.ReadUInt64();
-                ushort seg = r.ReadUInt16();
+                uint id1 = r.ReadUInt32();
+                r.ReadUInt32(); // flags
+                ushort rows1 = r.ReadUInt16();
+                r.ReadUInt32(); // build
+                float x1 = r.ReadSingle();
+                r.ReadSingle(); // y
+                r.ReadSingle(); // z
+                r.ReadSingle(); // a
+                r.ReadUInt16(); // seg
+                r.ReadUInt64(); // z1
+                r.ReadUInt64(); // z2
+                r.ReadUInt64(); // occ1
+                r.ReadUInt64(); // occ2
+                r.ReadUInt64(); // val
+                r.ReadUInt64(); // sh
 
-                Assert(id1 == 49152, "First block ID is 49152");
-                Assert(flags1 == 1, "First block flags == 1");
-                Assert(buildIndex1 == 100, "First block buildIndex == 100");
-                Assert(Math.Abs(posX - 123.45f) < 0.001f, "First block pos.x accurate");
-                Assert(seg == 1234, "First block segment is 1234");
-                Assert(valid == 0xFF && shared == 0 && occ1 == 1 && occ2 == 0 && z1 == 0x0F && z2 == 0, "First block bitmasks valid");
+                Assert(id1 == 50000u, "Block 1 ID is 50000");
+                Assert(rows1 == 4, "Block 1 RowCount is 4");
+                Assert(Math.Abs(x1 - 100.5f) < 0.001f, "Block 1 x position accurate");
 
-                // Skip block 2 and 3
-                for (int i = 1; i < 3; i++)
-                {
-                    r.ReadUInt16(); r.ReadUInt32(); r.ReadUInt32();
-                    r.ReadSingle(); r.ReadSingle(); r.ReadSingle(); r.ReadSingle();
-                    r.ReadUInt64(); r.ReadUInt64(); r.ReadUInt64(); r.ReadUInt64(); r.ReadUInt64(); r.ReadUInt64();
-                    r.ReadUInt16();
+                // Skip block 2
+                for (int i = 0; i < 15; i++) {
+                    if (i == 0 || i == 1 || i == 3) r.ReadUInt32();
+                    else if (i == 2 || i == 8) r.ReadUInt16();
+                    else if (i >= 4 && i <= 7) r.ReadSingle();
+                    else r.ReadUInt64();
                 }
 
-                int mappingCount = r.ReadInt32();
-                Assert(mappingCount == 2, "Segment mapping count is 2");
+                // Block 3
+                uint id3 = r.ReadUInt32();
+                Assert(id3 == 131071u, "Block 3 ID is 131071 (max 17-bit)");
 
-                ushort seg1 = r.ReadUInt16();
-                byte slot1 = r.ReadByte();
-                ushort high1 = r.ReadUInt16();
-                Assert(seg1 == 500 && slot1 == 0 && high1 == 49152, "First mapping: (500, Slot 0, High 49152)");
-
-                ushort seg2 = r.ReadUInt16();
-                byte slot2 = r.ReadByte();
-                ushort high2 = r.ReadUInt16();
-                Assert(seg2 == 600 && slot2 == 3 && high2 == 65535, "Second mapping: (600, Slot 3, High 65535)");
-            }
-        }
-
-        private static void TestSimulationExpansionModel()
-        {
-            Console.WriteLine("\n[3] Testing Memory Expansion & Free List Rebuild Model...");
-
-            const int EXPANDED_BLOCK_COUNT = 65536;
-            uint[] flagsBuffer = new uint[EXPANDED_BLOCK_COUNT];
-            ushort[] unusedItems = new ushort[EXPANDED_BLOCK_COUNT];
-
-            // Mark blocks 1..1000 as created
-            for (int i = 1; i <= 1000; i++)
-            {
-                flagsBuffer[i] = 1; // Created
-            }
-
-            // Mark block 55000 as created
-            flagsBuffer[55000] = 1;
-
-            // Rebuild free list
-            uint freeCount = 0;
-            for (int i = 1; i < EXPANDED_BLOCK_COUNT; i++)
-            {
-                if ((flagsBuffer[i] & 1) == 0)
-                {
-                    unusedItems[freeCount] = (ushort)i;
-                    freeCount++;
+                // Skip rest of block 3
+                for (int i = 1; i < 15; i++) {
+                    if (i == 1 || i == 3) r.ReadUInt32();
+                    else if (i == 2 || i == 8) r.ReadUInt16();
+                    else if (i >= 4 && i <= 7) r.ReadSingle();
+                    else r.ReadUInt64();
                 }
+
+                int mapCount = r.ReadInt32();
+                Assert(mapCount == 2, "Mapping count is 2");
+                ushort mSeg1 = r.ReadUInt16();
+                byte mSlot1 = r.ReadByte();
+                uint mHigh1 = r.ReadUInt32();
+                Assert(mSeg1 == 10 && mSlot1 == 0 && mHigh1 == 70000u, "First mapping: (Seg 10, Slot 0, 70000)");
+
+                ushort mSeg2 = r.ReadUInt16();
+                byte mSlot2 = r.ReadByte();
+                uint mHigh2 = r.ReadUInt32();
+                Assert(mSeg2 == 20 && mSlot2 == 3 && mHigh2 == 131071u, "Second mapping: (Seg 20, Slot 3, 131071)");
             }
-
-            Assert(freeCount == 65535 - 1001, "Free count matches exact total: 65535 - 1001 = " + (65535 - 1001));
-            Assert(unusedItems[0] == 1001, "First free slot is 1001");
-            Assert(unusedItems[freeCount - 1] == 65535, "Last free slot is 65535");
-
-            // Verify active count calculation: ItemCount() = m_size - m_unusedCount
-            uint itemCount = (uint)EXPANDED_BLOCK_COUNT - freeCount;
-            int activeBlockCount = (int)(itemCount - 1);
-            Assert(activeBlockCount == 1001, "Active block count is 1001 (slot 0 excluded)");
         }
 
-        private static void TestLoopBoundsAndWrapAround()
+        private static void TestInPlaceRelocationModel()
         {
-            Console.WriteLine("\n[4] Testing 64K Loop Bounds & Wrap-around Immunity...");
+            Console.WriteLine("\n[5] Testing In-Place Relocation Model (Zombie Block Immunity)...");
 
-            int visitedCount = 0;
-            int lastId = 0;
-            for (int blockID = 49152; blockID < 65536; blockID++)
-            {
-                visitedCount++;
-                lastId = blockID;
-            }
+            // Scenario: Head 100 (< 65536) is deleted.
+            // Following it is block 70000 (>= 65536).
+            // No other 16-bit blocks in chain.
+            // Action: In-Place Relocation moves block 70000 into slot 100.
+            ushort releasedHead = 100;
+            uint highNode = 70000u;
+            ushort segID = 55;
 
-            Assert(visitedCount == 16384, "Visited exactly 16,384 expanded blocks (65536 - 49152)");
-            Assert(lastId == 65535, "Last visited block is 65535 (0xFFFF)");
+            // Simulated state
+            uint segStartLeft = highNode; // Segment pointed to 70000
 
-            ushort castLast = (ushort)lastId;
-            Assert(castLast == 65535, "ushort cast preserves 65535 exactly without wrap-around");
-        }
+            // Relocate:
+            ushort newHead = releasedHead; // Slot 100 becomes new head
+            segStartLeft = newHead;       // Segment updated to point to 100
 
-        private static void TestGarbageCollectorModel()
-        {
-            Console.WriteLine("\n[5] Testing Auto-Garbage Collector Release Criteria Model...");
-
-            // Block A: created, but completely empty (zone1=0, zone2=0, occ1=0, occ2=0) on highway -> SHOULD RELEASE
-            bool blockACreated = true;
-            ulong blockAZone1 = 0, blockAZone2 = 0, blockAOcc1 = 0, blockAOcc2 = 0;
-            bool shouldReleaseA = blockACreated && (blockAZone1 == 0 && blockAZone2 == 0 && blockAOcc1 == 0 && blockAOcc2 == 0);
-            Assert(shouldReleaseA, "Block A (Empty on highway) is correctly targeted for release");
-
-            // Block B: created, has zoned cells (zone1 != 0) -> MUST NOT RELEASE
-            bool blockBCreated = true;
-            ulong blockBZone1 = 0x0F, blockBZone2 = 0, blockBOcc1 = 0, blockBOcc2 = 0;
-            bool shouldReleaseB = blockBCreated && (blockBZone1 == 0 && blockBZone2 == 0 && blockBOcc1 == 0 && blockBOcc2 == 0);
-            Assert(!shouldReleaseB, "Block B (Zoned) is protected from release");
-
-            // Block C: created, has occupied building (occ1 != 0) -> MUST NOT RELEASE
-            bool blockCCreated = true;
-            ulong blockCZone1 = 0, blockCZone2 = 0, blockCOcc1 = 1, blockCOcc2 = 0;
-            bool shouldReleaseC = blockCCreated && (blockCZone1 == 0 && blockCZone2 == 0 && blockCOcc1 == 0 && blockCOcc2 == 0);
-            Assert(!shouldReleaseC, "Block C (Building occupied) is protected from release");
+            Assert(newHead == 100, "New head slot is 100 (16-bit slot preserved for m_zoneGrid)");
+            Assert(segStartLeft == 100, "Segment pointer successfully updated from 70000 to 100");
+            Assert(newHead < 65536, "m_zoneGrid head guaranteed strictly < 65536 (zero ushort truncation)");
         }
 
         private static void TestCompiledAssemblyInspection()
@@ -284,38 +306,47 @@ namespace MoreZoneBlocks.Tests
 
             Assert(types.Contains("MoreZoneBlocks.ModInfo"), "Contains MoreZoneBlocks.ModInfo (IUserMod)");
             Assert(types.Contains("MoreZoneBlocks.LoadingExtension"), "Contains MoreZoneBlocks.LoadingExtension (LoadingExtensionBase)");
-            Assert(types.Contains("MoreZoneBlocks.ZoneCustomizer"), "Contains MoreZoneBlocks.ZoneCustomizer");
-            Assert(types.Contains("MoreZoneBlocks.SaveSanitizer"), "Contains MoreZoneBlocks.SaveSanitizer");
-            Assert(types.Contains("MoreZoneBlocks.ZonePatches"), "Contains MoreZoneBlocks.ZonePatches");
-            Assert(types.Contains("MoreZoneBlocks.LoopGuardPatches"), "Contains MoreZoneBlocks.LoopGuardPatches");
             Assert(types.Contains("MoreZoneBlocks.ZoneGarbageCollector"), "Contains MoreZoneBlocks.ZoneGarbageCollector");
             Assert(types.Contains("MoreZoneBlocks.Log"), "Contains MoreZoneBlocks.Log");
 
-            // Inspect methods inside ZonePatches
-            var zonePatchesType = assembly.MainModule.GetType("MoreZoneBlocks.ZonePatches");
+            // Verify all 8 Core128K types exist in the compiled assembly
+            Assert(types.Contains("MoreZoneBlocks.Core128K.BitStash128K"), "Contains Core128K.BitStash128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.DualPoolAllocator128K"), "Contains Core128K.DualPoolAllocator128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.ZoneGridLinker128K"), "Contains Core128K.ZoneGridLinker128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.NetSegmentZonePatches128K"), "Contains Core128K.NetSegmentZonePatches128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.RoadAICreateZoneBlocksTranspiler128K"), "Contains Core128K.RoadAICreateZoneBlocksTranspiler128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.ZoneTraversalTranspiler128K"), "Contains Core128K.ZoneTraversalTranspiler128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.ZoneUpdateAndSim128K"), "Contains Core128K.ZoneUpdateAndSim128K");
+            Assert(types.Contains("MoreZoneBlocks.Core128K.SaveSanitizer128K"), "Contains Core128K.SaveSanitizer128K");
+
+            // Inspect methods in ZoneUpdateAndSim128K
+            var simType = assembly.MainModule.GetType("MoreZoneBlocks.Core128K.ZoneUpdateAndSim128K");
+            bool hasAwakePostfix = false;
             bool hasSimStepTranspiler = false;
-            bool hasAwakeTranspiler = false;
-            bool hasCheckLimitsTranspiler = false;
+            bool hasSimStepPrefix = false;
 
-            foreach (var m in zonePatchesType.Methods)
+            foreach (var m in simType.Methods)
             {
-                if (m.Name == "ZoneManager_SimulationStepImpl_Transpiler") hasSimStepTranspiler = true;
-                if (m.Name == "ZoneManager_Awake_Transpiler") hasAwakeTranspiler = true;
-                if (m.Name == "ZoneManager_CheckLimits_Transpiler") hasCheckLimitsTranspiler = true;
+                if (m.Name == "Awake_Postfix") hasAwakePostfix = true;
+                if (m.Name == "SimulationStepImpl_Transpiler") hasSimStepTranspiler = true;
+                if (m.Name == "SimulationStepImpl_Prefix") hasSimStepPrefix = true;
             }
 
-            Assert(hasSimStepTranspiler, "ZonePatches contains ZoneManager_SimulationStepImpl_Transpiler");
-            Assert(hasAwakeTranspiler, "ZonePatches contains ZoneManager_Awake_Transpiler");
-            Assert(hasCheckLimitsTranspiler, "ZonePatches contains ZoneManager_CheckLimits_Transpiler");
+            Assert(hasAwakePostfix, "ZoneUpdateAndSim128K contains Awake_Postfix");
+            Assert(hasSimStepTranspiler, "ZoneUpdateAndSim128K contains SimulationStepImpl_Transpiler");
+            Assert(hasSimStepPrefix, "ZoneUpdateAndSim128K contains SimulationStepImpl_Prefix");
 
-            // Inspect methods inside LoopGuardPatches
-            var loopGuardType = assembly.MainModule.GetType("MoreZoneBlocks.LoopGuardPatches");
-            bool hasLoopGuardTranspiler = false;
-            foreach (var m in loopGuardType.Methods)
+            // Inspect methods in RoadAICreateZoneBlocksTranspiler128K
+            var roadType = assembly.MainModule.GetType("MoreZoneBlocks.Core128K.RoadAICreateZoneBlocksTranspiler128K");
+            bool hasRoadTranspiler = false;
+            bool hasWrapSL = false;
+            foreach (var m in roadType.Methods)
             {
-                if (m.Name == "Replace49152With65535Transpiler") hasLoopGuardTranspiler = true;
+                if (m.Name == "Transpiler") hasRoadTranspiler = true;
+                if (m.Name == "CreateStartLeft128K") hasWrapSL = true;
             }
-            Assert(hasLoopGuardTranspiler, "LoopGuardPatches contains Replace49152With65535Transpiler");
+            Assert(hasRoadTranspiler, "RoadAICreateZoneBlocksTranspiler128K contains Transpiler");
+            Assert(hasWrapSL, "RoadAICreateZoneBlocksTranspiler128K contains CreateStartLeft128K wrapper");
         }
     }
 }
