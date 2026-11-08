@@ -22,6 +22,17 @@ namespace MoreZoneBlocks
             {
                 Patcher.PatchAll();
             });
+
+            try
+            {
+                var go = new UnityEngine.GameObject("MZB_DirectAutoTestBoot");
+                UnityEngine.Object.DontDestroyOnLoad(go);
+                go.AddComponent<DirectAutoTestBootBehaviour>();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("Could not create MZB_DirectAutoTestBoot: " + ex.Message);
+            }
         }
 
         public void OnDisabled()
