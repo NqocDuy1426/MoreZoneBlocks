@@ -856,12 +856,12 @@ namespace MoreZoneBlocks.Core128K
     [HarmonyPatch(typeof(RoadAI), "CreateZoneBlocks")]
     public static class RoadAICreateZoneBlocksTranspiler128K
     {
-        // 4 hàm bọc (Wrappers) thay thế cho ZoneManager.CreateBlock tại 4 vị trí của NetSegment:
+        // 4 hàm bọc (Wrappers) chuẩn khớp 100% với 9 giá trị trên IL Evaluation Stack của Vanilla:
         public static bool CreateStartLeft128K(
             ZoneManager zm, ref NetSegment seg, ref Randomizer r,
-            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+            ushort segmentID, Vector3 pos, float angle, int rows, float dist, uint buildIdx)
         {
-            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, segmentID, pos, angle, rows, dist, buildIdx))
             {
                 BitStash128K.SetStartLeft32(ref seg, id32);
                 return true;
@@ -871,9 +871,9 @@ namespace MoreZoneBlocks.Core128K
 
         public static bool CreateStartRight128K(
             ZoneManager zm, ref NetSegment seg, ref Randomizer r,
-            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+            ushort segmentID, Vector3 pos, float angle, int rows, float dist, uint buildIdx)
         {
-            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, segmentID, pos, angle, rows, dist, buildIdx))
             {
                 BitStash128K.SetStartRight32(ref seg, id32);
                 return true;
@@ -883,9 +883,9 @@ namespace MoreZoneBlocks.Core128K
 
         public static bool CreateEndLeft128K(
             ZoneManager zm, ref NetSegment seg, ref Randomizer r,
-            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+            ushort segmentID, Vector3 pos, float angle, int rows, float dist, uint buildIdx)
         {
-            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, segmentID, pos, angle, rows, dist, buildIdx))
             {
                 BitStash128K.SetEndLeft32(ref seg, id32);
                 return true;
@@ -895,9 +895,9 @@ namespace MoreZoneBlocks.Core128K
 
         public static bool CreateEndRight128K(
             ZoneManager zm, ref NetSegment seg, ref Randomizer r,
-            Vector3 pos, float angle, int rows, float dist, uint buildIdx)
+            ushort segmentID, Vector3 pos, float angle, int rows, float dist, uint buildIdx)
         {
-            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, 0, pos, angle, rows, dist, buildIdx))
+            if (NetSegmentZonePatches128K.CreateBlock128K(zm, out uint id32, ref r, segmentID, pos, angle, rows, dist, buildIdx))
             {
                 BitStash128K.SetEndRight32(ref seg, id32);
                 return true;
@@ -976,7 +976,101 @@ namespace MoreZoneBlocks.Core128K
 
 ---
 
-### 6.8 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
+### 6.8 Mã Nguồn Lõi 6: `ZoneTraversalTranspiler128K.cs` (Universal 17-Bit Linked-List Traversal Transpiler)
+
+#### Cơ chế tự động hóa duyệt lưới 17-bit:
+Trong game gốc có hơn 12 hàm (`CalculateBlock2`, `CalculateBlock3`, `SimulationStep`, `CheckZoning`, `ApplyZoning`, `RenderOverlay`...) duyệt chuỗi liên kết `m_nextGridBlock` theo cấu trúc:
+```csharp
+ushort num = instance.m_zoneGrid[z * 150 + x]; // Luôn < 65536 nhờ Head-Reservation
+while (num != 0)
+{
+    num = instance.m_blocks.m_buffer[num].m_nextGridBlock; // <-- Điểm nghẽn 16-bit
+}
+```
+
+* **Nguyên lý ECMA-335 CIL:** Mọi biến cục bộ kiểu `uint16` trên Stack Frame của CPU thực chất vẫn chiếm slot 32-bit (`int32`). C# compiler khi dịch phép gán `m_nextGridBlock` không hề phát sinh lệnh `conv.u2`.
+* **Universal Transpiler:** Quét qua tất cả 12 hàm mục tiêu:
+  1. Thay thế lệnh `ldfld uint16 ZoneBlock::m_nextGridBlock` bằng `call uint32 BitStash128K::GetNextGridBlock32(valuetype ZoneBlock&)`.
+  2. Nâng toàn bộ hằng số chốt chặn vòng lặp (`Loop Guard`) từ `49152` lên `131072` (`BitStash128K.MAX_BLOCK_COUNT`).
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
+using HarmonyLib;
+
+namespace MoreZoneBlocks.Core128K
+{
+    /// <summary>
+    /// Mã Nguồn Lõi 6: Universal 17-Bit Linked-List Traversal Transpiler.
+    /// Tự động biến mọi phép đọc `.m_nextGridBlock` (16-bit) thành `BitStash128K.GetNextGridBlock32(ref block)` (17-bit)
+    /// trên toàn bộ hệ thống ZoneBlock, ZoneManager, Building và ZoneTool!
+    /// </summary>
+    [HarmonyPatch]
+    public static class ZoneTraversalTranspiler128K
+    {
+        [HarmonyTargetMethods]
+        public static IEnumerable<MethodBase> TargetMethods()
+        {
+            // 1. Nhóm hàm tính toán va chạm & mọc nhà của ZoneBlock
+            yield return AccessTools.Method(typeof(ZoneBlock), "CalculateBlock2");
+            yield return AccessTools.Method(typeof(ZoneBlock), "CalculateBlock3");
+            yield return AccessTools.Method(typeof(ZoneBlock), "IsGoodPlace");
+            yield return AccessTools.Method(typeof(ZoneBlock), "SimulationStep");
+
+            // 2. Nhóm hàm kiểm tra không gian & địa hình của ZoneManager
+            yield return AccessTools.Method(typeof(ZoneManager), "CheckSpace");
+            yield return AccessTools.Method(typeof(ZoneManager), "TerrainUpdated");
+
+            // 3. Nhóm hàm kiểm tra quy hoạch của Building (giúp nhà trên block >= 65536 không bị sập!)
+            yield return AccessTools.Method(typeof(Building), nameof(Building.CheckZoning));
+            yield return AccessTools.Method(typeof(BuildingTool), "GetAllZoneBlocks");
+
+            // 4. Nhóm hàm công cụ tô màu quy hoạch & hiển thị lưới (ZoneTool / DefaultTool)
+            yield return AccessTools.Method(typeof(ZoneTool), "ApplyZoning");
+            yield return AccessTools.Method(typeof(ZoneTool), "ApplyBrush");
+            yield return AccessTools.Method(typeof(ZoneTool), "CalculateFillBuffer");
+            yield return AccessTools.Method(typeof(DefaultTool), nameof(DefaultTool.RenderOverlay));
+        }
+
+        [HarmonyTranspiler]
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var codes = new List<CodeInstruction>(instructions);
+
+            FieldInfo fNextGridBlock = AccessTools.Field(typeof(ZoneBlock), nameof(ZoneBlock.m_nextGridBlock));
+            MethodInfo mGetNext32 = AccessTools.Method(typeof(BitStash128K), nameof(BitStash128K.GetNextGridBlock32));
+
+            for (int i = 0; i < codes.Count; i++)
+            {
+                var inst = codes[i];
+
+                // 1. Thay thế phép đọc trường 16-bit `block.m_nextGridBlock`
+                //    bằng lời gọi 17-bit `BitStash128K.GetNextGridBlock32(ref block)`
+                if (inst.opcode == OpCodes.Ldfld && Equals(inst.operand, fNextGridBlock))
+                {
+                    // Trong CIL, trước ldfld trên m_buffer[num] luôn là lệnh ldelema ZoneBlock
+                    // (đẩy địa chỉ `ref ZoneBlock` lên stack), nên gọi hàm nhận `ref ZoneBlock` khớp 100%!
+                    inst.opcode = OpCodes.Call;
+                    inst.operand = mGetNext32;
+                }
+                // 2. Nâng toàn bộ chốt chặn vòng lặp vô tận (Infinite Loop Guard) từ 49152 lên 131072
+                else if (inst.opcode == OpCodes.Ldc_I4 && Convert.ToInt32(inst.operand) == 49152)
+                {
+                    inst.operand = BitStash128K.MAX_BLOCK_COUNT; // 131072
+                }
+
+                yield return inst;
+            }
+        }
+    }
+}
+```
+
+---
+
+### 6.9 Tại Sao Kiến Trúc Bit-Stashing + Dual-Pool Này Là Bước Đột Phá Vô Địch?
 
 1. **0 Byte Mảng Phụ Ngoại Lai:** Không cần tạo thêm bất kỳ mảng `uint[]` nào cho `NetSegment` hay `m_zoneGrid`. Toàn bộ dữ liệu nằm gọn trong layout struct gốc của engine.
 2. **Bảo toàn 100% `m_zoneGrid` (`ushort[]`):** Nhờ cơ chế Dual-Pool + Tail-Chaining, con trỏ đầu ô đất luôn là số 16-bit ($< 65.536$). Cả $65.536$ blocks mở rộng ($65.536..131.071$) đều nép mình sau Head thông qua con trỏ 17-bit cực kỳ trơn tru.
