@@ -64,6 +64,19 @@ namespace MoreZoneBlocks
                     ZoneUpdateAndSim128K.Awake_Postfix(zm);
                 }
             }
+
+            // Kích hoạt SimTester nếu đang trong phiên kiểm thử tự động
+            try
+            {
+                var go = new UnityEngine.GameObject("MZB128KSimTester");
+                UnityEngine.Object.DontDestroyOnLoad(go);
+                go.AddComponent<MZB128KSimTester>();
+                Log.Info("Spawned MZB128KSimTester component.");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("Could not spawn MZB128KSimTester: " + ex.Message);
+            }
         }
     }
 

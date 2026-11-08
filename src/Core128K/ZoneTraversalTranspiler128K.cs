@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
+using UnityEngine;
 
 namespace MoreZoneBlocks.Core128K
 {
@@ -17,44 +18,54 @@ namespace MoreZoneBlocks.Core128K
         [HarmonyTargetMethods]
         public static IEnumerable<MethodBase> TargetMethods()
         {
-            // 1. Nhóm hàm tính toán va chạm & mọc nhà của ZoneBlock
-            MethodInfo m = AccessTools.Method(typeof(ZoneBlock), "CalculateBlock2");
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneBlock), "CalculateBlock3");
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneBlock), "IsGoodPlace");
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneBlock), "SimulationStep");
+            MethodInfo m = null;
+
+            // 1. ZoneBlock.CalculateBlock2(ushort)
+            m = AccessTools.Method(typeof(ZoneBlock), "CalculateBlock2", new Type[] { typeof(ushort) });
             if (m != null) yield return m;
 
-            // 2. Nhóm hàm kiểm tra không gian, lưới & địa hình của ZoneManager
-            m = AccessTools.Method(typeof(ZoneManager), "CheckSpace");
+            // 2. ZoneBlock.SimulationStep(ushort)
+            m = AccessTools.Method(typeof(ZoneBlock), "SimulationStep", new Type[] { typeof(ushort) });
             if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneManager), "TerrainUpdated");
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneManager), "UpdateBlocks", new Type[] { typeof(ColossalFramework.Math.Quad2) });
-            if (m != null) yield return m;
+
+            // 3. ZoneManager.ReleaseBlockImplementation(ushort, ref ZoneBlock)
             m = AccessTools.Method(typeof(ZoneManager), "ReleaseBlockImplementation", new Type[] { typeof(ushort), typeof(ZoneBlock).MakeByRefType() });
             if (m != null) yield return m;
 
-            // 3. Nhóm hàm kiểm tra quy hoạch của Building & BuildingTool
-            m = AccessTools.Method(typeof(Building), nameof(Building.CheckZoning));
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(BuildingTool), "GetAllZoneBlocks");
-            if (m != null) yield return m;
-            m = AccessTools.Method(typeof(BuildingTool), "SimulationStep");
+            // 4. ZoneManager.UpdateBlocks(Quad2)
+            m = AccessTools.Method(typeof(ZoneManager), "UpdateBlocks", new Type[] { typeof(ColossalFramework.Math.Quad2) });
             if (m != null) yield return m;
 
-            // 4. Nhóm hàm công cụ tô màu quy hoạch & hiển thị lưới (ZoneTool / DefaultTool)
-            m = AccessTools.Method(typeof(ZoneTool), "ApplyZoning");
+            // 5. ZoneManager.CheckSpace(Vector3, float, int, int, out int)
+            m = AccessTools.Method(typeof(ZoneManager), "CheckSpace", new Type[] { typeof(Vector3), typeof(float), typeof(int), typeof(int), typeof(int).MakeByRefType() });
             if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneTool), "ApplyBrush");
+
+            // 6. ZoneManager.TerrainUpdated(TerrainArea, TerrainArea, TerrainArea)
+            m = AccessTools.Method(typeof(ZoneManager), "TerrainUpdated", new Type[] { typeof(TerrainArea), typeof(TerrainArea), typeof(TerrainArea) });
             if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneTool), "ApplyFill");
+
+            // 7. Building.CheckZoning(ItemClass.Zone, ItemClass.Zone, bool)
+            m = AccessTools.Method(typeof(Building), "CheckZoning", new Type[] { typeof(ItemClass.Zone), typeof(ItemClass.Zone), typeof(bool) });
             if (m != null) yield return m;
-            m = AccessTools.Method(typeof(ZoneTool), "CalculateFillBuffer");
+
+            // 8. BuildingTool.SimulationStep()
+            m = AccessTools.Method(typeof(BuildingTool), "SimulationStep", Type.EmptyTypes);
             if (m != null) yield return m;
-            m = AccessTools.Method(typeof(DefaultTool), nameof(DefaultTool.RenderOverlay));
+
+            // 9. ZoneTool.CalculateFillBuffer(Vector3, Vector3, ItemClass.Zone, bool, bool)
+            m = AccessTools.Method(typeof(ZoneTool), "CalculateFillBuffer", new Type[] { typeof(Vector3), typeof(Vector3), typeof(ItemClass.Zone), typeof(bool), typeof(bool) });
+            if (m != null) yield return m;
+
+            // 10. ZoneTool.ApplyFill()
+            m = AccessTools.Method(typeof(ZoneTool), "ApplyFill", Type.EmptyTypes);
+            if (m != null) yield return m;
+
+            // 11. ZoneTool.ApplyZoning()
+            m = AccessTools.Method(typeof(ZoneTool), "ApplyZoning", Type.EmptyTypes);
+            if (m != null) yield return m;
+
+            // 12. ZoneTool.ApplyBrush()
+            m = AccessTools.Method(typeof(ZoneTool), "ApplyBrush", Type.EmptyTypes);
             if (m != null) yield return m;
         }
 
