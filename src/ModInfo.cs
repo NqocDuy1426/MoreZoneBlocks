@@ -10,7 +10,7 @@ namespace MoreZoneBlocks
     public sealed class ModInfo : IUserMod
     {
         public const string HARMONY_ID = "com.ngocduy.morezoneblocks2";
-        public const string MOD_NAME = "More Zone Blocks 2 BETA by NgocDuy";
+        public const string MOD_NAME = "More Zone Blocks 2 (128K) by NgocDuy";
         public const string MOD_DESCRIPTION = "Doubles Zone Block capacity to 128K (131,072 blocks) with 17-Bit Bit-Stashing, Tail-Chained m_zoneGrid, and Sidecar Stream save preservation. By NgocDuy.";
 
         public string Name => MOD_NAME;
@@ -90,14 +90,14 @@ namespace MoreZoneBlocks
 
             try
             {
-                Log.Info("Applying MoreZoneBlocks 2 BETA (128K) Harmony patches...");
+                Log.Info("Applying MoreZoneBlocks 2 (128K) Harmony patches...");
                 Harmony harmony = new Harmony(ModInfo.HARMONY_ID);
 
                 // Tự động quét và kích hoạt toàn bộ các patch Harmony trong Assembly (các module Core128K)
                 harmony.PatchAll(Assembly.GetExecutingAssembly());
 
                 s_isPatched = true;
-                Log.Info("MoreZoneBlocks 2 BETA (128K) Harmony patches applied successfully.");
+                Log.Info("MoreZoneBlocks 2 (128K) Harmony patches applied successfully.");
             }
             catch (Exception ex)
             {

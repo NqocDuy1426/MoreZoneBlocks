@@ -5,23 +5,23 @@
 	"contentfolder"		"/Users/nqocduy/CS_MoreZoneBlocks/content_beta"
 	"previewfile"		"/Users/nqocduy/CS_MoreZoneBlocks/preview-image.png"
 	"visibility"		"0"
-	"title"		"More Zone Blocks 2 BETA (128K)"
-	"description"		"[h1]🏗️ MORE ZONE BLOCKS 2 BETA (128K) 🏗️[/h1]
+	"title"		"More Zone Blocks 2 (128K)"
+	"description"		"[h1]🏗️ MORE ZONE BLOCKS 2 (128K) 🏗️[/h1]
 [b]The Ultimate 128K Zone Block Capacity Mod for Cities: Skylines[/b]
 [i]Engineered with 17-Bit Bit-Stashing Architecture, Tail-Chained Spatial Grid, and Two-Stream Save Preservation by NgocDuy[/i]
 
 [hr][/hr]
 
-[h1]🌟 WHAT IS MORE ZONE BLOCKS 2 BETA?[/h1]
+[h1]🌟 WHAT IS MORE ZONE BLOCKS 2?[/h1]
 Have you ever hit the invisible [b]Zone Block limit[/b] while building massive sprawling cities, regional networks, or using [b]81 Tiles 2[/b]?
 [list]
 [*] [b]Vanilla Limit:[/b] 49,152 Zone Blocks (48K)
 [*] [b]More Zone Blocks v1.0:[/b] 65,535 Zone Blocks (64K)
-[*] [b]More Zone Blocks 2 BETA:[/b] [b]131,072 Zone Blocks (128K) — +166.7% over Vanilla![/b]
+[*] [b]More Zone Blocks 2:[/b] [b]131,072 Zone Blocks (128K) — +166.7% over Vanilla![/b]
 [/list]
 
 When building extensive road networks, every segment spawns up to 4 Zone Blocks. Vanilla exhausts its 49,152 quota quickly. More Zone Blocks v1.0 expanded it to the 16-bit ceiling (65,535).
-[b]More Zone Blocks 2 BETA shatters the 16-bit barrier[/b], doubling capacity to [b]131,072 Zone Blocks (128K)[/b] using revolutionary [b]17-Bit Bit-Stashing[/b]!
+[b]More Zone Blocks 2 shatters the 16-bit barrier[/b], doubling capacity to [b]131,072 Zone Blocks (128K)[/b] using revolutionary [b]17-Bit Bit-Stashing[/b]!
 
 [hr][/hr]
 
@@ -86,5 +86,5 @@ Tested and 100% compatible with the modern modding ecosystem:
 [hr][/hr]
 
 [i]Developed with precision and care for the Cities: Skylines community by NgocDuy.[/i]"
-	"changenote"		"v2.0.1-beta: Fix Road & Bridge placement by expanding ZoneManager.CheckLimits and ZoneManager.CreateBlock to 128K (eliminates 'Cannot create more zone blocks' on saves exceeding 48K), and restore environment prop/tree updating in NetSegment.UpdateZones."
+	"changenote"		"v2.0.2: Official release of More Zone Blocks 2 (128K) — 131,072 Zone Block capacity, 17-bit Bit-Stashing, Dual-Pool allocation, Road & Bridge placement compatibility, and full 128-block simulation pacing."
 }
