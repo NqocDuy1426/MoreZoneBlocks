@@ -1,9 +1,12 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using ColossalFramework;
+using ColossalFramework.IO;
 
 namespace MoreZoneBlocks
 {
@@ -400,6 +403,113 @@ namespace MoreZoneBlocks
                     }
                 }
                 catch { }
+            }
+        }
+
+        // ====================================================================
+        // 7. MessageManager.Data.Deserialize EOF Guard (Prevents 16.7M Iteration Hang)
+        // ====================================================================
+        [HarmonyPatch(typeof(MessageManager.Data), "Deserialize")]
+        public static class MessageManager_Data_Deserialize_Patch
+        {
+            [HarmonyPrefix]
+            [HarmonyPriority(Priority.First)]
+            public static bool Prefix(DataSerializer s)
+            {
+                try
+                {
+                    if (s != null)
+                    {
+                        var fiStream = typeof(DataSerializer).GetField("m_stream", BindingFlags.NonPublic | BindingFlags.Instance);
+                        Stream st = fiStream != null ? (Stream)fiStream.GetValue(s) : null;
+                        if (st != null && (st.Position >= st.Length - 16))
+                        {
+                            Log.Warning("[DayNightDeadlockShield] MessageManager.Data.Deserialize: Stream is at EOF. Initializing safe empty message queue to prevent 16.7M loop hang ✓");
+                            var mm = Singleton<MessageManager>.instance;
+                            if (mm != null)
+                            {
+                                var fQueue = typeof(MessageManager).GetField("m_messages", BindingFlags.NonPublic | BindingFlags.Instance);
+                                if (fQueue != null && fQueue.GetValue(mm) == null)
+                                {
+                                    fQueue.SetValue(mm, new Queue<MessageBase>());
+                                }
+                            }
+                            return false; // Skip execution to prevent s.ReadUInt24() returning 16777215 and hanging!
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Guard error on MessageManager.Data.Deserialize: " + ex.Message);
+                }
+                return true;
+            }
+        }
+
+        // ====================================================================
+        // 8. StatisticsManager & StatisticsPanel NRE Safety Guards
+        // ====================================================================
+        [HarmonyPatch(typeof(StatisticsManager), "Get", new Type[] { typeof(StatisticType) })]
+        public static class StatisticsManager_Get_Patch
+        {
+            private static FieldInfo s_fStats;
+
+            [HarmonyPrefix]
+            public static bool Prefix(StatisticsManager __instance, StatisticType type, ref StatisticBase __result)
+            {
+                if (__instance == null)
+                {
+                    __result = null;
+                    return false;
+                }
+                if (s_fStats == null)
+                {
+                    s_fStats = typeof(StatisticsManager).GetField("m_statistics", BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+                if (s_fStats != null && s_fStats.GetValue(__instance) == null)
+                {
+                    __result = null;
+                    return false;
+                }
+                return true;
+            }
+
+            [HarmonyFinalizer]
+            public static Exception Finalizer(Exception __exception, ref StatisticBase __result)
+            {
+                if (__exception != null)
+                {
+                    __result = null;
+                }
+                return null;
+            }
+        }
+
+        [HarmonyPatch(typeof(StatisticsPanel), "Awake")]
+        public static class StatisticsPanel_Awake_Patch
+        {
+            [HarmonyFinalizer]
+            public static Exception Finalizer(Exception __exception)
+            {
+                if (__exception != null)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Suppressed StatisticsPanel.Awake exception: " + __exception.Message);
+                }
+                return null;
+            }
+        }
+
+        [HarmonyPatch(typeof(StatisticsPanel), "OnCheckboxChanged")]
+        public static class StatisticsPanel_OnCheckboxChanged_Patch
+        {
+            [HarmonyFinalizer]
+            public static Exception Finalizer(Exception __exception)
+            {
+                if (__exception != null)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Suppressed StatisticsPanel.OnCheckboxChanged exception: " + __exception.Message);
+                }
+                return null;
             }
         }
     }

@@ -374,6 +374,10 @@ namespace MoreZoneBlocks.Tests
             Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/TerrainManager_UpdateData_Patch"), "Contains TerrainManager_UpdateData_Patch");
             Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/PathManager_WaitForAllPaths_Patch"), "Contains PathManager_WaitForAllPaths_Patch");
             Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/LoadingManager_QuitApplication_Patch"), "Contains LoadingManager_QuitApplication_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/MessageManager_Data_Deserialize_Patch"), "Contains MessageManager_Data_Deserialize_Patch (16.7M EOF Loop Shield)");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/StatisticsManager_Get_Patch"), "Contains StatisticsManager_Get_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/StatisticsPanel_Awake_Patch"), "Contains StatisticsPanel_Awake_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/StatisticsPanel_OnCheckboxChanged_Patch"), "Contains StatisticsPanel_OnCheckboxChanged_Patch");
         }
     }
 }

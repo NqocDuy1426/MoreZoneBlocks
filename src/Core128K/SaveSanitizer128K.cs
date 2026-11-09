@@ -276,19 +276,12 @@ namespace MoreZoneBlocks.Core128K
             SimulationManager sm = Singleton<SimulationManager>.instance;
             bool hasV2Sidecar = (sm?.m_serializableDataStorage != null && sm.m_serializableDataStorage.ContainsKey(SIDECAR_KEY));
 
+            // CRITICAL: In Cities: Skylines, the main simulation stream for ZoneManager ALWAYS contains
+            // exactly 49,152 blocks. Both v1.0 and v2.0 use sidecars (m_serializableDataStorage) for blocks >= 49,152.
+            // Under NO circumstance does the vanilla main stream contain 65,536 blocks. Setting targetSize to 65,536
+            // causes ZoneManager.Data.Deserialize to overread the stream by 461KB, corrupting guides and throwing
+            // stream alignment out for PropManager, TreeManager, MessageManager, etc.
             uint targetSize = 49152u;
-            if (hasV2Sidecar)
-            {
-                targetSize = 49152u; // v2.0 save: sidecar takes care of high blocks, main stream is clean 48K
-            }
-            else if (s_isLegacy64KSave)
-            {
-                targetSize = 65536u; // v1.0 save: main stream contains 64K blocks!
-            }
-            else
-            {
-                targetSize = 49152u; // Vanilla save: 48K
-            }
 
             zm.m_blocks.m_buffer = new ZoneBlock[targetSize];
             FieldInfo fSize = AccessTools.Field(typeof(Array16<ZoneBlock>), "m_size");

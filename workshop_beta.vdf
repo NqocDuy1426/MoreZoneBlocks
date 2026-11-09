@@ -86,5 +86,5 @@ Tested and 100% compatible with the modern modding ecosystem:
 [hr][/hr]
 
 [i]Developed with precision and care for the Cities: Skylines community by NgocDuy.[/i]"
-	"changenote"		"v2.0.2: Official release of More Zone Blocks 2 (128K) — 131,072 Zone Block capacity, 17-bit Bit-Stashing, Dual-Pool allocation, Road & Bridge placement compatibility, and full 128-block simulation pacing."
+	"changenote"		"v2.0.3: Resolved stream desynchronization during ZoneManager deserialization and added EOF & NRE guards for MessageManager and StatisticsPanel to eliminate DayNightProperties loading screen freeze."
 }
