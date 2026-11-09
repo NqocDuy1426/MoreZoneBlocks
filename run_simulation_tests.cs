@@ -347,6 +347,21 @@ namespace MoreZoneBlocks.Tests
             }
             Assert(hasRoadTranspiler, "RoadAICreateZoneBlocksTranspiler128K contains Transpiler");
             Assert(hasWrapSL, "RoadAICreateZoneBlocksTranspiler128K contains CreateStartLeft128K wrapper");
+
+            // Inspect methods in NetSegmentZonePatches128K
+            var segType = assembly.MainModule.GetType("MoreZoneBlocks.Core128K.NetSegmentZonePatches128K");
+            bool hasCheckLimits = false;
+            bool hasCreateBlock = false;
+            bool hasUpdateZones = false;
+            foreach (var m in segType.Methods)
+            {
+                if (m.Name == "CheckLimits_Prefix") hasCheckLimits = true;
+                if (m.Name == "CreateBlock_Prefix") hasCreateBlock = true;
+                if (m.Name == "UpdateZones_Prefix") hasUpdateZones = true;
+            }
+            Assert(hasCheckLimits, "NetSegmentZonePatches128K contains CheckLimits_Prefix (Fix for roads/bridges beyond 48K)");
+            Assert(hasCreateBlock, "NetSegmentZonePatches128K contains CreateBlock_Prefix");
+            Assert(hasUpdateZones, "NetSegmentZonePatches128K contains UpdateZones_Prefix");
         }
     }
 }

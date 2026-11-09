@@ -117,8 +117,55 @@ namespace MoreZoneBlocks.Core128K
         }
 
         /// <summary>
+        /// 3b. Mở rộng giới hạn ZoneBlock kiểm tra bởi RoadAI.CheckBuildPosition từ 48.640 lên 131.072 (128K)
+        /// Ngăn chặn triệt để lỗi không thể đặt đường và cầu khi số lượng ZoneBlock kế thừa từ save cũ vượt quá 48.640!
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager), nameof(ZoneManager.CheckLimits))]
+        [HarmonyPrefix]
+        public static bool CheckLimits_Prefix(ZoneManager __instance, ref bool __result)
+        {
+            if (__instance == null)
+            {
+                __result = false;
+                return false;
+            }
+            // 128K: Cho phép xây đường khi tổng số slot trống > 0 và blockCount chưa chạm trần 130.560
+            __result = DualPoolAllocator128K.TotalFreeCount > 0 && __instance.m_blockCount < (BitStash128K.MAX_BLOCK_COUNT - 512);
+            return false; // Bỏ qua hoàn toàn giới hạn 48.640 cũ của Vanilla
+        }
+
+        /// <summary>
+        /// 3c. Định tuyến mọi lời gọi ZoneManager.CreateBlock truyền thống (16-bit) sang bộ cấp phát DualPool 128K
+        /// </summary>
+        [HarmonyPatch(typeof(ZoneManager), nameof(ZoneManager.CreateBlock))]
+        [HarmonyPrefix]
+        public static bool CreateBlock_Prefix(
+            ZoneManager __instance,
+            out ushort block,
+            ref Randomizer randomizer,
+            ushort segmentID,
+            Vector3 position,
+            float angle,
+            int rows,
+            int distance,
+            uint buildIndex,
+            ref bool __result)
+        {
+            if (__instance != null && CreateBlock128K(__instance, out uint id32, ref randomizer, segmentID, position, angle, rows, distance, buildIndex))
+            {
+                block = (ushort)id32;
+                __result = true;
+                return false;
+            }
+            block = 0;
+            __result = false;
+            return false;
+        }
+
+        /// <summary>
         /// 4. Khi cập nhật vùng quy hoạch quanh đoạn đường (NetSegment.UpdateZones):
         /// Đánh dấu cập nhật đúng vị trí trên mảng m_updatedBlocks[2048] cho cả các block >= 65536
+        /// Đồng thời đảm bảo dọn dẹp Prop và Tree bên dưới đoạn đường/cầu
         /// </summary>
         [HarmonyPatch(typeof(NetSegment), nameof(NetSegment.UpdateZones))]
         [HarmonyPrefix]
@@ -126,26 +173,26 @@ namespace MoreZoneBlocks.Core128K
         {
             if ((__instance.m_flags & NetSegment.Flags.Created) == 0) return false;
 
+            NetInfo info = __instance.Info;
+            if (info == null || info.m_class == null || info.m_class.m_layer != ItemClass.Layer.Default) return false;
+
             ZoneManager zm = ZoneManager.instance;
             if (zm == null || zm.m_blocks.m_buffer == null) return false;
 
-            uint b1 = BitStash128K.GetStartLeft32(ref __instance);
-            uint b2 = BitStash128K.GetStartRight32(ref __instance);
-            uint b3 = BitStash128K.GetEndLeft32(ref __instance);
-            uint b4 = BitStash128K.GetEndRight32(ref __instance);
+            Vector3 min = __instance.m_bounds.min;
+            Vector3 max = __instance.m_bounds.max;
 
-            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            bool hasBlocks = false;
+            // 1. Cập nhật các khối quy hoạch 128K trong phạm vi đoạn đường
+            UpdateBlocksInArea128K(zm, min.x - 46f, min.z - 46f, max.x + 46f, max.z + 46f);
 
-            AccumulateBlockBounds(zm, b1, ref min, ref max, ref hasBlocks);
-            AccumulateBlockBounds(zm, b2, ref min, ref max, ref hasBlocks);
-            AccumulateBlockBounds(zm, b3, ref min, ref max, ref hasBlocks);
-            AccumulateBlockBounds(zm, b4, ref min, ref max, ref hasBlocks);
-
-            if (hasBlocks)
+            // 2. Bảo toàn việc dọn dẹp Props và Trees bên dưới đường và cầu
+            if (PropManager.exists)
             {
-                UpdateBlocksInArea128K(zm, min.x - 42f, min.z - 42f, max.x + 42f, max.z + 42f);
+                PropManager.instance.UpdateProps(min.x, min.z, max.x, max.z);
+            }
+            if (TreeManager.exists)
+            {
+                TreeManager.instance.UpdateTrees(min.x, min.z, max.x, max.z);
             }
 
             return false; // Chặn hàm 16-bit gốc
