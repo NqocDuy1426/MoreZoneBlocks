@@ -274,7 +274,6 @@ namespace MoreZoneBlocks.Tests
             // Action: In-Place Relocation moves block 70000 into slot 100.
             ushort releasedHead = 100;
             uint highNode = 70000u;
-            ushort segID = 55;
 
             // Simulated state
             uint segStartLeft = highNode; // Segment pointed to 70000
@@ -285,7 +284,7 @@ namespace MoreZoneBlocks.Tests
 
             Assert(newHead == 100, "New head slot is 100 (16-bit slot preserved for m_zoneGrid)");
             Assert(segStartLeft == 100, "Segment pointer successfully updated from 70000 to 100");
-            Assert(newHead < 65536, "m_zoneGrid head guaranteed strictly < 65536 (zero ushort truncation)");
+            Assert((uint)newHead < 65536u, "m_zoneGrid head guaranteed strictly < 65536 (zero ushort truncation)");
         }
 
         private static void TestCompiledAssemblyInspection()
@@ -302,6 +301,10 @@ namespace MoreZoneBlocks.Tests
             foreach (var t in assembly.MainModule.Types)
             {
                 types.Add(t.FullName);
+                foreach (var nested in t.NestedTypes)
+                {
+                    types.Add(nested.FullName);
+                }
             }
 
             Assert(types.Contains("MoreZoneBlocks.ModInfo"), "Contains MoreZoneBlocks.ModInfo (IUserMod)");
@@ -362,6 +365,15 @@ namespace MoreZoneBlocks.Tests
             Assert(hasCheckLimits, "NetSegmentZonePatches128K contains CheckLimits_Prefix (Fix for roads/bridges beyond 48K)");
             Assert(hasCreateBlock, "NetSegmentZonePatches128K contains CreateBlock_Prefix");
             Assert(hasUpdateZones, "NetSegmentZonePatches128K contains UpdateZones_Prefix");
+
+            // Inspect DayNightDeadlockShield
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield"), "Contains MoreZoneBlocks.DayNightDeadlockShield");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/DayNightProperties_InitializeProperties_Patch"), "Contains DayNightProperties_InitializeProperties_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/LoadingManager_WaitUntilEssentialScenesLoaded_Patch"), "Contains LoadingManager_WaitUntilEssentialScenesLoaded_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/TerrainManager_LateUpdateData_Patch"), "Contains TerrainManager_LateUpdateData_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/TerrainManager_UpdateData_Patch"), "Contains TerrainManager_UpdateData_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/PathManager_WaitForAllPaths_Patch"), "Contains PathManager_WaitForAllPaths_Patch");
+            Assert(types.Contains("MoreZoneBlocks.DayNightDeadlockShield/LoadingManager_QuitApplication_Patch"), "Contains LoadingManager_QuitApplication_Patch");
         }
     }
 }
