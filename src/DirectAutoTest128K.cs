@@ -39,24 +39,39 @@ namespace MoreZoneBlocks
         }
     }
 
-    [HarmonyPatch(typeof(UIDynamicPanels))]
     public static class UIDynamicPanels_Hide_Patch
     {
-        [HarmonyPatch("Hide", new Type[] { typeof(string), typeof(int) })]
-        [HarmonyPrefix]
-        public static void PrefixInt(UIDynamicPanels __instance, string panelName)
+        public static Exception SafeHideFinalizer(Exception ex, UIDynamicPanels instance, string panelName)
         {
-            ReconcileModal(__instance, panelName);
+            if (ex != null)
+            {
+                Log.Warning("[MoreZoneBlocks] Handled UIDynamicPanels.Hide safely: " + ex.Message);
+                try
+                {
+                    if (instance != null && !string.IsNullOrEmpty(panelName))
+                    {
+                        var cachedPanelsField = AccessTools.Field(typeof(UIDynamicPanels), "m_CachedPanels");
+                        var cached = cachedPanelsField?.GetValue(instance) as System.Collections.IDictionary;
+                        if (cached != null && cached.Contains(panelName))
+                        {
+                            object panelInfo = cached[panelName];
+                            var instProp = AccessTools.Property(panelInfo.GetType(), "instance");
+                            UIComponent comp = instProp?.GetValue(panelInfo, null) as UIComponent;
+                            if (comp != null)
+                            {
+                                comp.Hide();
+                                comp.isVisible = false;
+                            }
+                        }
+                    }
+                }
+                catch { }
+                return null; // Suppress exception completely so callers succeed!
+            }
+            return null;
         }
 
-        [HarmonyPatch("Hide", new Type[] { typeof(string) })]
-        [HarmonyPrefix]
-        public static void PrefixSingle(UIDynamicPanels __instance, string panelName)
-        {
-            ReconcileModal(__instance, panelName);
-        }
-
-        private static void ReconcileModal(UIDynamicPanels instance, string panelName)
+        public static void ReconcileModal(UIDynamicPanels instance, string panelName)
         {
             try
             {
@@ -83,6 +98,78 @@ namespace MoreZoneBlocks
                 }
             }
             catch { }
+        }
+    }
+
+    [HarmonyPatch(typeof(UIDynamicPanels), "Hide", new Type[] { typeof(string), typeof(int) })]
+    public static class UIDynamicPanels_HideInt_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix(UIDynamicPanels __instance, string panelName)
+        {
+            UIDynamicPanels_Hide_Patch.ReconcileModal(__instance, panelName);
+        }
+
+        [HarmonyFinalizer]
+        public static Exception Finalizer(Exception __exception, UIDynamicPanels __instance, string panelName)
+        {
+            return UIDynamicPanels_Hide_Patch.SafeHideFinalizer(__exception, __instance, panelName);
+        }
+    }
+
+    [HarmonyPatch]
+    public static class UIDynamicPanels_HideSingle_Patch
+    {
+        [HarmonyTargetMethod]
+        public static System.Reflection.MethodBase TargetMethod()
+        {
+            return typeof(UIDynamicPanels)
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .FirstOrDefault(m => m.Name == "Hide" && !m.IsGenericMethod && m.GetParameters().Length == 1);
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(UIDynamicPanels __instance, string panelName)
+        {
+            UIDynamicPanels_Hide_Patch.ReconcileModal(__instance, panelName);
+        }
+
+        [HarmonyFinalizer]
+        public static Exception Finalizer(Exception __exception, UIDynamicPanels __instance, string panelName)
+        {
+            return UIDynamicPanels_Hide_Patch.SafeHideFinalizer(__exception, __instance, panelName);
+        }
+    }
+
+    [HarmonyPatch(typeof(MenuPanel), "OnClosed")]
+    public static class MenuPanel_OnClosed_Patch
+    {
+        [HarmonyFinalizer]
+        public static Exception Finalizer(Exception __exception, MenuPanel __instance)
+        {
+            if (__exception != null)
+            {
+                Log.Warning("[MoreZoneBlocks] Handled MenuPanel.OnClosed safely: " + __exception.Message);
+                try
+                {
+                    if (__instance != null)
+                    {
+                        var comp = __instance.GetComponent<UIComponent>();
+                        if (comp != null)
+                        {
+                            comp.Hide();
+                            comp.isVisible = false;
+                        }
+                        else
+                        {
+                            __instance.gameObject.SetActive(false);
+                        }
+                    }
+                }
+                catch { }
+                return null;
+            }
+            return null;
         }
     }
 
@@ -173,7 +260,8 @@ namespace MoreZoneBlocks
                         comp.name.Contains("WhatsNew") || 
                         comp.name.Contains("DLC") || comp.name.Contains("Paradox") || 
                         comp.name.Contains("News") || comp.name.Contains("WorkshopAd") ||
-                        comp.name.Contains("FPS") || comp.name.Contains("Booster")))
+                        comp.name.Contains("FPS") || comp.name.Contains("Booster") ||
+                        comp.name.Contains("Exception") || comp.GetType().Name.Contains("Exception")))
                     {
                         comp.Hide();
                         comp.isVisible = false;
