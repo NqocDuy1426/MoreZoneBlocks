@@ -290,8 +290,11 @@ namespace MoreZoneBlocks
         {
             try
             {
+                Log.Info("[SaveSanitizer] PrepareEarlySidecarData CALLED!");
                 s_pendingSidecarBytes = null;
                 SimulationManager sm = Singleton<SimulationManager>.instance;
+                Log.Info("[SaveSanitizer] SimulationManager: " + (sm != null ? "OK" : "NULL") + 
+                    ", storage: " + (sm != null && sm.m_serializableDataStorage != null ? sm.m_serializableDataStorage.Count + " keys" : "NULL"));
                 if (sm != null && sm.m_serializableDataStorage != null)
                 {
                     byte[] data;

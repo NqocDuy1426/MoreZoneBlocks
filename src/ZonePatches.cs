@@ -27,7 +27,8 @@ namespace MoreZoneBlocks
                 MethodInfo zoneDeserialize = typeof(ZoneManager.Data).GetMethod("Deserialize", BindingFlags.Public | BindingFlags.Instance);
                 MethodInfo zoneDeserializePrefix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_Deserialize_Prefix), BindingFlags.Public | BindingFlags.Static);
                 MethodInfo zoneDeserializePostfix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_Deserialize_Postfix), BindingFlags.Public | BindingFlags.Static);
-                harmony.Patch(zoneDeserialize, prefix: new HarmonyMethod(zoneDeserializePrefix), postfix: new HarmonyMethod(zoneDeserializePostfix));
+                MethodInfo zoneDeserializeTranspiler = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_Deserialize_Transpiler), BindingFlags.Public | BindingFlags.Static);
+                harmony.Patch(zoneDeserialize, prefix: new HarmonyMethod(zoneDeserializePrefix), postfix: new HarmonyMethod(zoneDeserializePostfix), transpiler: new HarmonyMethod(zoneDeserializeTranspiler));
 
                 MethodInfo zoneAfterDeserialize = typeof(ZoneManager.Data).GetMethod("AfterDeserialize", BindingFlags.Public | BindingFlags.Instance);
                 MethodInfo zoneAfterDeserializePostfix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_AfterDeserialize_Postfix), BindingFlags.Public | BindingFlags.Static);
@@ -91,6 +92,51 @@ namespace MoreZoneBlocks
         {
             // Restore sidecar blocks and NetSegment mappings after all essential scenes are loaded
             SaveSanitizer.RestoreSidecarData();
+        }
+
+        // ====================================================================
+        // ZONEMANAGER.DATA.DESERIALIZE TRANSPILER — Critical stream protection
+        // The vanilla loop reads m_blocks.m_buffer.Length iterations from the EncodedArray.
+        // After our Awake transpiler expands buffer to 65536, this causes a 461KB stream overread.
+        // Fix: Replace the first ldlen (blocks.Length) with ldc.i4 49152 so vanilla reads
+        // exactly the right number of block entries from the save stream.
+        // ====================================================================
+
+        public static IEnumerable<CodeInstruction> ZoneManager_Data_Deserialize_Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var codes = new List<CodeInstruction>(instructions);
+            bool patched = false;
+
+            // Find the FIRST ldlen instruction — this is blocks.Length (V_3)
+            // IL pattern: ldloc.1 → ldlen → conv.i4 → stloc.3
+            for (int i = 0; i < codes.Count; i++)
+            {
+                if (codes[i].opcode == OpCodes.Ldlen)
+                {
+                    // Replace:  [i-1] ldloc.1 → nop (remove array ref push)
+                    //           [i]   ldlen   → ldc.i4 49152
+                    //           [i+1] conv.i4 → nop
+                    if (i > 0)
+                    {
+                        codes[i - 1] = new CodeInstruction(OpCodes.Nop);
+                    }
+                    codes[i] = new CodeInstruction(OpCodes.Ldc_I4, ZoneCustomizer.VANILLA_BLOCK_COUNT);
+                    if (i + 1 < codes.Count && codes[i + 1].opcode == OpCodes.Conv_I4)
+                    {
+                        codes[i + 1] = new CodeInstruction(OpCodes.Nop);
+                    }
+                    patched = true;
+                    Log.Info("Transpiled ZoneManager.Data.Deserialize: blocks.Length ldlen → ldc.i4 49152 ✓");
+                    break; // Only replace the FIRST ldlen (blocks), not the second (zoneGrid)
+                }
+            }
+
+            if (!patched)
+            {
+                Log.Warning("ZoneManager.Data.Deserialize transpiler: could not find ldlen for blocks.Length!");
+            }
+
+            return codes;
         }
 
         // ====================================================================

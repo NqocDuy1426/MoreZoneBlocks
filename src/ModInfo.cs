@@ -61,12 +61,15 @@ namespace MoreZoneBlocks
                 Log.Info("Applying MoreZoneBlocks Harmony patches...");
                 Harmony harmony = new Harmony(ModInfo.HARMONY_ID);
 
-                // 1. Quét và áp dụng các shield an toàn (StreamTagShield, DayNightDeadlockShield)
-                harmony.PatchAll(Assembly.GetExecutingAssembly());
-
-                // 2. Áp dụng các patch mở rộng 64K ZoneBlocks và bảo vệ vòng lặp
+                // 1. Áp dụng các patch mở rộng 64K ZoneBlocks và bảo vệ vòng lặp
                 ZonePatches.Apply(harmony);
                 LoopGuardPatches.Apply(harmony);
+
+                // 2. Áp dụng StreamTagShield (manual patch cho 2-string overload)
+                StreamTagShield.ApplyManual(harmony);
+
+                // 3. DayNightDeadlockShield (nested [HarmonyPatch] classes)
+                DayNightDeadlockShield.ApplyManual(harmony);
 
                 s_isPatched = true;
                 Log.Info("MoreZoneBlocks Harmony patches applied successfully.");

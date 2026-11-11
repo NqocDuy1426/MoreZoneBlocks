@@ -22,6 +22,34 @@ namespace MoreZoneBlocks
     /// </summary>
     public static class DayNightDeadlockShield
     {
+        public static void ApplyManual(Harmony harmony)
+        {
+            Log.Info("[DayNightDeadlockShield] ApplyManual starting...");
+            int patchCount = 0;
+            Type outerType = typeof(DayNightDeadlockShield);
+            Type[] nestedTypes = outerType.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic);
+            Log.Info("[DayNightDeadlockShield] Found " + nestedTypes.Length + " nested types");
+            foreach (Type nested in nestedTypes)
+            {
+                try
+                {
+                    var attrs = nested.GetCustomAttributes(typeof(HarmonyPatch), false);
+                    if (attrs != null && attrs.Length > 0)
+                    {
+                        Log.Info("[DayNightDeadlockShield] Patching " + nested.Name + "...");
+                        harmony.CreateClassProcessor(nested).Patch();
+                        patchCount++;
+                        Log.Info("[DayNightDeadlockShield] Patched " + nested.Name + " ✓");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Failed to patch " + nested.Name + ": " + ex.Message);
+                }
+            }
+            Log.Info("[DayNightDeadlockShield] Applied " + patchCount + " nested patches ✓");
+        }
+
         // ====================================================================
         // 1. DayNightProperties.InitializeProperties
         // ====================================================================
