@@ -8,7 +8,7 @@
 	"title"		"More Zone Blocks v1.0"
 	"description"		"[h1]🏗️ MORE ZONE BLOCKS v1.0 🏗️[/h1]
 [b]The Definitive 64K Zone Block Limit Breaker for Cities: Skylines[/b]
-[i]Engineered with Two-Stream Vanilla Save Preservation and 64-Block Simulation Pacing by NgocDuy[/i]
+[i]Engineered with Two-Stream Vanilla Save Preservation, 64-Block Simulation Pacing, and Universal Stream Armor by NgocDuy[/i]
 
 [hr][/hr]
 
@@ -27,6 +27,9 @@ New roads lose their zoning grids completely (no colored zoning squares appear),
 [*] [b]More Zone Blocks Limit:[/b] [b]65,535 Zone Blocks (16-bit Maximum Ceiling)[/b]
 [*] [b]Savegame Safety:[/b] [b]Two-Stream Vanilla Preservation (100% Safe to load without mods)[/b]
 [*] [b]Simulation Guarantee:[/b] 64-Block frame pacing ensures buildings grow properly on all extended blocks
+[*] [b]Stream Armor:[/b] Exact IL stream bounds protection preventing downstream manager desynchronization
+[*] [b]Deadlock Shield:[/b] Integrated loading profiler safeguards against DayNightProperties and essential scene freezes
+[*] [b]Backward Compatibility:[/b] Seamlessly loads vanilla saves, 64K saves, and 128K extended saves
 [*] [b]Compatibility:[/b] 100% compatible with 81 Tiles 2, More Nodes/Segments, Zoning Adjuster, Move It, Network Anarchy, and RICO
 [/list]
 
@@ -36,14 +39,20 @@ New roads lose their zoning grids completely (no colored zoning squares appear),
 
 [list]
 [*] [b]Safe 16-Bit Architecture (Zero Overflow):[/b]
-    By expanding to 65,535 ($0xFFFF$), all internal pointers in [i]NetSegment[/i], [i]ZoneBlock[/i], and [i]ZoneManager[/i] remain native [b]ushort[/b]. No memory layout corruption, no struct bloat, and zero CPU register overflow.
+    By expanding to 65,535 (0xFFFF), all internal pointers in [i]NetSegment[/i], [i]ZoneBlock[/i], and [i]ZoneManager[/i] remain native [b]ushort[/b]. No memory layout corruption, no struct bloat, and zero CPU register overflow.
 
 [*] [b]Two-Stream Save Preservation (Zero Dangling Pointers):[/b]
-    Before saving, block pointers $\ge 49,152$ in [i]NetSegment[/i] are temporarily sanitized to 0 for the vanilla save stream, while their mapping and full data are safely packaged into a custom Sidecar Stream ([i]MoreZoneBlocks_Extended[/i]).
+    Before saving, block pointers >= 49,152 in [i]NetSegment[/i] are temporarily sanitized to 0 for the vanilla save stream, while their mapping and full data are safely packaged into a custom Sidecar Stream ([i]MoreZoneBlocks_Extended[/i]).
     [b]Result:[/b] Your savegame can be opened on vanilla or unmodded installations without triggering fatal [i]IndexOutOfRangeException[/i] crashes! When loaded with More Zone Blocks, all 65K blocks and segment linkages are seamlessly restored.
 
+[*] [b]IL Stream Alignment & Deserialization Defense-in-Depth:[/b]
+    During deserialization, a surgical IL transpiler on [i]ZoneManager.Data.Deserialize[/i] clamps the buffer read bound to exactly 49,152 blocks. This prevents a critical 461 KB stream overread, guaranteeing 100% clean stream alignment for PropManager, TreeManager, WeatherManager, and all subsequent managers.
+
+[*] [b]Loading Screen Deadlock Shield:[/b]
+    Armed with bounded-timeout protection against [i]DayNightProperties[/i] coroutine hangs and [i]WaitUntilEssentialScenesLoaded[/i] lockups, ensuring game loading never freezes even with large mod lists and hundreds of custom assets.
+
 [*] [b]64-Block Frame Pacing (100% Simulation Coverage):[/b]
-    Vanilla's [i]ZoneManager.SimulationStepImpl[/i] only steps 48 blocks per frame ($1,024 \times 48 = 49,152$). We re-engineered the pacing to [b]64 blocks per frame ($1,024 \times 64 = 65,536$)[/b].
+    Vanilla's [i]ZoneManager.SimulationStepImpl[/i] only steps 48 blocks per frame (1,024 x 48 = 49,152). We re-engineered the pacing to [b]64 blocks per frame (1,024 x 64 = 65,536)[/b].
     [b]Result:[/b] All extended blocks receive active simulation ticks, allowing residential, commercial, industrial, and office zones to grow naturally.
 
 [*] [b]18 Inlined Loop Guards Neutralized:[/b]
@@ -60,7 +69,7 @@ Tested and fully compatible with the modern modding ecosystem:
 [list]
 [*] [b]Harmony 2.2+[/b] (Required dependency)
 [*] [b]More Nodes/Segments (v5.1.4+)[/b] (Perfect synergy)
-[*] [b]81 Tiles 2[/b] (Coexistence architecture: respects $270 \times 270$ zone grid)
+[*] [b]81 Tiles 2[/b] (Coexistence architecture: respects 270 x 270 zone grid)
 [*] [b]Zoning Adjuster[/b]
 [*] [b]Network Anarchy[/b]
 [*] [b]Move It[/b]
@@ -82,5 +91,11 @@ Tested and fully compatible with the modern modding ecosystem:
 [hr][/hr]
 
 [i]Developed with precision and care for the Cities: Skylines community by NgocDuy.[/i]"
-	"changenote"		"Updated official Steam Workshop preview thumbnail with custom 64K Zone Blocks artwork."
+	"changenote"		"[v1.0.1 Hotfix & Stability Update]
+- Fixed save stream desynchronization during deserialization: Added IL transpiler on ZoneManager.Data.Deserialize to clamp reading buffer bound to exactly 49,152 blocks, permanently resolving downstream stream misalignment (WeatherManager tag mismatches, Prop/Tree corruption).
+- Added Universal StreamTagShield for 2-string LoadingProfiler overloads.
+- Added DayNightDeadlockShield with bounded-timeout protection against DayNightProperties loading screen freezes.
+- Added exception armor for BuildingManager.RefreshStyleBuildings to prevent simulation failure from missing workshop assets.
+- Backward Compatibility: Full support for loading saves created with 128K extended formats, safely remapping to 64K.
+- Tested and verified 100% working on large mega-cities!"
 }
