@@ -170,11 +170,16 @@ namespace MoreZoneBlocks
                     if (__instance.m_essentialScenesLoaded) return false;
 
                     int waited = 0;
-                    const int maxWait = 4000; // 4 seconds bounded timeout
+                    const int maxWait = 300000; // 5 minutes — must wait for all 600+ assets to load
+                    const int logInterval = 30000; // Log every 30 seconds
                     while (!__instance.m_essentialScenesLoaded && !IsTerminated(__instance) && waited < maxWait)
                     {
-                        System.Threading.Thread.Sleep(20);
-                        waited += 20;
+                        System.Threading.Thread.Sleep(100);
+                        waited += 100;
+                        if (waited % logInterval == 0)
+                        {
+                            Log.Info(string.Format("[DayNightDeadlockShield] Still waiting for essential scenes... ({0}s elapsed)", waited / 1000));
+                        }
                     }
 
                     if (!__instance.m_essentialScenesLoaded)
