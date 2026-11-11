@@ -14,6 +14,9 @@ namespace MoreZoneBlocks
         public const uint SIDECAR_MAGIC = 0x4D5A4231; // "MZB1"
         public const uint SIDECAR_VERSION = 1;
 
+        public const string SIDECAR_DATA_KEY_128K = "MoreZoneBlocks_Extended_128K";
+        public const uint SIDECAR_MAGIC_128K = 0x4D5A4232; // "MZB2"
+
         private delegate void InitializeBlockInvoker(ZoneManager instance, ushort block, ref ZoneBlock data);
         private static InitializeBlockInvoker s_initializeBlock;
 
@@ -280,7 +283,8 @@ namespace MoreZoneBlocks
 
         /// <summary>
         /// Called at ZoneManager.Data.Deserialize Prefix:
-        /// Loads the sidecar byte array from SimulationManager before vanilla deserialization.
+        /// Loads the sidecar byte array from SimulationManager before vanilla deserialization,
+        /// and resets m_blocks to 49,152 to prevent vanilla from overreading the stream!
         /// </summary>
         public static void PrepareEarlySidecarData()
         {
@@ -296,6 +300,22 @@ namespace MoreZoneBlocks
                         s_pendingSidecarBytes = data;
                         Log.Info(string.Format("Found MoreZoneBlocks sidecar data ({0} bytes) in savegame storage.", data.Length));
                     }
+                    else if (sm.m_serializableDataStorage.TryGetValue(SIDECAR_DATA_KEY_128K, out data))
+                    {
+                        s_pendingSidecarBytes = data;
+                        Log.Info(string.Format("Found MoreZoneBlocks 128K sidecar data ({0} bytes) in savegame storage. Backward compatible restore.", data.Length));
+                    }
+                }
+
+                // CRITICAL STREAM PROTECTION:
+                // In Cities: Skylines, the main simulation stream for ZoneManager ALWAYS contains exactly 49,152 blocks.
+                // Reset m_blocks to 49,152 before deserialization so vanilla doesn't overread the stream by 16,384 elements (461 KB),
+                // which destroys stream alignment for PropManager, TreeManager, WeatherManager, etc.
+                ZoneManager zm = Singleton<ZoneManager>.instance;
+                if (zm != null)
+                {
+                    zm.m_blocks = new Array16<ZoneBlock>((uint)ZoneCustomizer.VANILLA_BLOCK_COUNT);
+                    Log.Info("ZoneManager.Data.Deserialize Prefix: Set buffer to 49,152 to protect stream alignment.");
                 }
             }
             catch (Exception ex)
@@ -305,7 +325,7 @@ namespace MoreZoneBlocks
         }
 
         /// <summary>
-        /// Called at ZoneManager.Data.Deserialize Postfix:
+        /// Called at ZoneManager.Data.AfterDeserialize Postfix:
         /// Expands memory to 65,536, restores extended blocks and segment pointers,
         /// rebuilds spatial hash grid for extended blocks, and updates block count.
         /// </summary>
@@ -333,68 +353,127 @@ namespace MoreZoneBlocks
                 using (BinaryReader r = new BinaryReader(ms))
                 {
                     uint magic = r.ReadUInt32();
-                    if (magic != SIDECAR_MAGIC)
-                    {
-                        Log.Error(string.Format("Invalid sidecar magic: 0x{0:X8}", magic));
-                        return;
-                    }
-
                     uint version = r.ReadUInt32();
-                    if (version > SIDECAR_VERSION)
+
+                    if (magic == SIDECAR_MAGIC && version <= SIDECAR_VERSION)
                     {
-                        Log.Error(string.Format("Unsupported sidecar version: {0}", version));
-                        return;
-                    }
+                        // Restore Extended Blocks (v1 64K format)
+                        loadedBlocksCount = r.ReadInt32();
+                        ZoneBlock[] blocks = zm.m_blocks.m_buffer;
 
-                    // Restore Extended Blocks
-                    loadedBlocksCount = r.ReadInt32();
-                    ZoneBlock[] blocks = zm.m_blocks.m_buffer;
-
-                    for (int i = 0; i < loadedBlocksCount; i++)
-                    {
-                        ushort id = r.ReadUInt16();
-                        if (id < blocks.Length)
+                        for (int i = 0; i < loadedBlocksCount; i++)
                         {
-                            blocks[id].m_flags = r.ReadUInt32();
-                            blocks[id].m_buildIndex = r.ReadUInt32();
-                            blocks[id].m_position = new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
-                            blocks[id].m_angle = r.ReadSingle();
-                            blocks[id].m_valid = r.ReadUInt64();
-                            blocks[id].m_shared = r.ReadUInt64();
-                            blocks[id].m_occupied1 = r.ReadUInt64();
-                            blocks[id].m_occupied2 = r.ReadUInt64();
-                            blocks[id].m_zone1 = r.ReadUInt64();
-                            blocks[id].m_zone2 = r.ReadUInt64();
-                            blocks[id].m_segment = r.ReadUInt16();
-                        }
-                        else
-                        {
-                            // Skip bytes if out of bounds
-                            r.ReadBytes(4 + 4 + 12 + 4 + 8 + 8 + 8 + 8 + 8 + 8 + 2);
-                        }
-                    }
-
-                    // Restore Segment Mappings
-                    loadedMappingsCount = r.ReadInt32();
-                    NetManager nm = Singleton<NetManager>.instance;
-                    NetSegment[] segments = nm != null ? nm.m_segments.m_buffer : null;
-
-                    for (int i = 0; i < loadedMappingsCount; i++)
-                    {
-                        ushort segID = r.ReadUInt16();
-                        byte slot = r.ReadByte();
-                        ushort highID = r.ReadUInt16();
-
-                        if (segments != null && segID < segments.Length)
-                        {
-                            switch (slot)
+                            ushort id = r.ReadUInt16();
+                            if (id < blocks.Length)
                             {
-                                case 0: segments[segID].m_blockStartLeft = highID; break;
-                                case 1: segments[segID].m_blockStartRight = highID; break;
-                                case 2: segments[segID].m_blockEndLeft = highID; break;
-                                case 3: segments[segID].m_blockEndRight = highID; break;
+                                blocks[id].m_flags = r.ReadUInt32();
+                                blocks[id].m_buildIndex = r.ReadUInt32();
+                                blocks[id].m_position = new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+                                blocks[id].m_angle = r.ReadSingle();
+                                blocks[id].m_valid = r.ReadUInt64();
+                                blocks[id].m_shared = r.ReadUInt64();
+                                blocks[id].m_occupied1 = r.ReadUInt64();
+                                blocks[id].m_occupied2 = r.ReadUInt64();
+                                blocks[id].m_zone1 = r.ReadUInt64();
+                                blocks[id].m_zone2 = r.ReadUInt64();
+                                blocks[id].m_segment = r.ReadUInt16();
+                            }
+                            else
+                            {
+                                r.ReadBytes(4 + 4 + 12 + 4 + 8 + 8 + 8 + 8 + 8 + 8 + 2);
                             }
                         }
+
+                        // Restore Segment Mappings
+                        loadedMappingsCount = r.ReadInt32();
+                        NetManager nm = Singleton<NetManager>.instance;
+                        NetSegment[] segments = nm != null ? nm.m_segments.m_buffer : null;
+
+                        for (int i = 0; i < loadedMappingsCount; i++)
+                        {
+                            ushort segID = r.ReadUInt16();
+                            byte slot = r.ReadByte();
+                            ushort highID = r.ReadUInt16();
+
+                            if (segments != null && segID < segments.Length)
+                            {
+                                switch (slot)
+                                {
+                                    case 0: segments[segID].m_blockStartLeft = highID; break;
+                                    case 1: segments[segID].m_blockStartRight = highID; break;
+                                    case 2: segments[segID].m_blockEndLeft = highID; break;
+                                    case 3: segments[segID].m_blockEndRight = highID; break;
+                                }
+                            }
+                        }
+                    }
+                    else if (magic == SIDECAR_MAGIC_128K)
+                    {
+                        // Restore Extended Blocks from 128K format
+                        loadedBlocksCount = r.ReadInt32();
+                        ZoneBlock[] blocks = zm.m_blocks.m_buffer;
+
+                        for (int i = 0; i < loadedBlocksCount; i++)
+                        {
+                            uint id32 = r.ReadUInt32();
+                            uint flags = r.ReadUInt32();
+                            uint buildIndex = r.ReadUInt32();
+                            float px = r.ReadSingle();
+                            float py = r.ReadSingle();
+                            float pz = r.ReadSingle();
+                            float angle = r.ReadSingle();
+                            ushort segment = r.ReadUInt16();
+                            ulong zone1 = r.ReadUInt64();
+                            ulong zone2 = r.ReadUInt64();
+                            ulong occupied1 = r.ReadUInt64();
+                            ulong occupied2 = r.ReadUInt64();
+                            ulong valid = r.ReadUInt64();
+                            ulong shared = r.ReadUInt64();
+
+                            if (id32 < (uint)blocks.Length)
+                            {
+                                ushort id = (ushort)id32;
+                                blocks[id].m_flags = flags | ZoneBlock.FLAG_CREATED;
+                                blocks[id].m_buildIndex = buildIndex;
+                                blocks[id].m_position = new Vector3(px, py, pz);
+                                blocks[id].m_angle = angle;
+                                blocks[id].m_valid = valid;
+                                blocks[id].m_shared = shared;
+                                blocks[id].m_occupied1 = occupied1;
+                                blocks[id].m_occupied2 = occupied2;
+                                blocks[id].m_zone1 = zone1;
+                                blocks[id].m_zone2 = zone2;
+                                blocks[id].m_segment = segment;
+                            }
+                        }
+
+                        loadedMappingsCount = r.ReadInt32();
+                        NetManager nm = Singleton<NetManager>.instance;
+                        NetSegment[] segments = nm != null ? nm.m_segments.m_buffer : null;
+
+                        for (int i = 0; i < loadedMappingsCount; i++)
+                        {
+                            ushort segID = r.ReadUInt16();
+                            byte slot = r.ReadByte();
+                            uint highID32 = r.ReadUInt32();
+
+                            if (segments != null && segID < segments.Length && highID32 < (uint)blocks.Length)
+                            {
+                                ushort highID = (ushort)highID32;
+                                switch (slot)
+                                {
+                                    case 0: segments[segID].m_blockStartLeft = highID; break;
+                                    case 1: segments[segID].m_blockStartRight = highID; break;
+                                    case 2: segments[segID].m_blockEndLeft = highID; break;
+                                    case 3: segments[segID].m_blockEndRight = highID; break;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Log.Error(string.Format("Unsupported sidecar magic: 0x{0:X8}, version: {1}", magic, version));
+                        return;
                     }
                 }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using ColossalFramework;
 using HarmonyLib;
 
 namespace MoreZoneBlocks
@@ -27,6 +28,10 @@ namespace MoreZoneBlocks
                 MethodInfo zoneDeserializePrefix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_Deserialize_Prefix), BindingFlags.Public | BindingFlags.Static);
                 MethodInfo zoneDeserializePostfix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_Deserialize_Postfix), BindingFlags.Public | BindingFlags.Static);
                 harmony.Patch(zoneDeserialize, prefix: new HarmonyMethod(zoneDeserializePrefix), postfix: new HarmonyMethod(zoneDeserializePostfix));
+
+                MethodInfo zoneAfterDeserialize = typeof(ZoneManager.Data).GetMethod("AfterDeserialize", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo zoneAfterDeserializePostfix = typeof(ZonePatches).GetMethod(nameof(ZoneManager_Data_AfterDeserialize_Postfix), BindingFlags.Public | BindingFlags.Static);
+                harmony.Patch(zoneAfterDeserialize, postfix: new HarmonyMethod(zoneAfterDeserializePostfix));
 
                 // 2. ZoneManager.Awake (Transpiler + Postfix defense-in-depth)
                 MethodInfo zmAwake = typeof(ZoneManager).GetMethod("Awake", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -74,6 +79,17 @@ namespace MoreZoneBlocks
 
         public static void ZoneManager_Data_Deserialize_Postfix()
         {
+            // Expand buffer to 64K immediately so no subsequent deserialization step sees 48K
+            ZoneManager zm = Singleton<ZoneManager>.instance;
+            if (zm != null)
+            {
+                ZoneCustomizer.EnsureExpanded(zm);
+            }
+        }
+
+        public static void ZoneManager_Data_AfterDeserialize_Postfix()
+        {
+            // Restore sidecar blocks and NetSegment mappings after all essential scenes are loaded
             SaveSanitizer.RestoreSidecarData();
         }
 

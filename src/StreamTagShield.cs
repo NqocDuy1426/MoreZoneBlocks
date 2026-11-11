@@ -100,10 +100,16 @@ namespace MoreZoneBlocks
                         bool match1 = tagIdx1 >= 0 && p1 == (byte)(tagIdx1 >> 8) && p2 == (byte)(tagIdx1 & 0xFF);
                         bool match2 = tagIdx2 >= 0 && p1 == (byte)(tagIdx2 >> 8) && p2 == (byte)(tagIdx2 & 0xFF);
 
-                        if (match1 || match2)
+                        // If it's a known index match or unique string marker (254)
+                        if (match1 || match2 || p1 == 254)
                         {
-                            s.ReadSharedString(); // Clean match at current pos!
-                            return false; // Skip vanilla throw
+                            string readTag = s.ReadSharedString();
+                            if (readTag == name1 || (!string.IsNullOrEmpty(name2) && readTag == name2))
+                            {
+                                return false; // Clean clean match (no throw, no false alarm log)
+                            }
+                            Log.Warning($"[StreamTagShield] Suppressed {(isBegin ? "Begin" : "End")} tag mismatch ({name1}/{name2}, read '{readTag}'). Proceeding safely ✓");
+                            return false;
                         }
 
                         // Stream misaligned: search forward up to 2MB for tag1 or tag2
@@ -143,7 +149,10 @@ namespace MoreZoneBlocks
                     try
                     {
                         string readTag = s.ReadSharedString();
-                        Log.Warning($"[StreamTagShield] Suppressed {(isBegin ? "Begin" : "End")} tag mismatch ({name1}/{name2}, read '{readTag}'). Proceeding safely ✓");
+                        if (readTag != name1 && (string.IsNullOrEmpty(name2) || readTag != name2))
+                        {
+                            Log.Warning($"[StreamTagShield] Suppressed {(isBegin ? "Begin" : "End")} tag mismatch ({name1}/{name2}, read '{readTag}'). Proceeding safely ✓");
+                        }
                     }
                     catch { }
                 }
