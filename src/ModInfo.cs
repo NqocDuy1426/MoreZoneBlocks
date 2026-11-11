@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using ICities;
 using CitiesHarmony.API;
 using HarmonyLib;
@@ -60,6 +61,10 @@ namespace MoreZoneBlocks
                 Log.Info("Applying MoreZoneBlocks Harmony patches...");
                 Harmony harmony = new Harmony(ModInfo.HARMONY_ID);
 
+                // 1. Quét và áp dụng các shield an toàn (StreamTagShield, DayNightDeadlockShield)
+                harmony.PatchAll(Assembly.GetExecutingAssembly());
+
+                // 2. Áp dụng các patch mở rộng 64K ZoneBlocks và bảo vệ vòng lặp
                 ZonePatches.Apply(harmony);
                 LoopGuardPatches.Apply(harmony);
 
