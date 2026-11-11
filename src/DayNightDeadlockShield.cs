@@ -540,5 +540,39 @@ namespace MoreZoneBlocks
                 return null;
             }
         }
+
+        // ====================================================================
+        // 11. BuildingManager.RefreshStyleBuildings — suppress NullRef from missing assets
+        // ====================================================================
+        [HarmonyPatch(typeof(BuildingManager), "RefreshStyleBuildings")]
+        public static class BuildingManager_RefreshStyleBuildings_Patch
+        {
+            [HarmonyFinalizer]
+            public static Exception Finalizer(Exception __exception)
+            {
+                if (__exception != null)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Suppressed BuildingManager.RefreshStyleBuildings exception (missing asset): " + __exception.Message);
+                }
+                return null;
+            }
+        }
+
+        // ====================================================================
+        // 12. BuildingManager.Data.AfterDeserialize — armor against crash during building load
+        // ====================================================================
+        [HarmonyPatch(typeof(BuildingManager.Data), "AfterDeserialize")]
+        public static class BuildingManager_Data_AfterDeserialize_Patch
+        {
+            [HarmonyFinalizer]
+            public static Exception Finalizer(Exception __exception)
+            {
+                if (__exception != null)
+                {
+                    Log.Warning("[DayNightDeadlockShield] Suppressed BuildingManager.Data.AfterDeserialize exception: " + __exception.Message);
+                }
+                return null;
+            }
+        }
     }
 }
